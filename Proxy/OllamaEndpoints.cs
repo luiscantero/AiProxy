@@ -208,13 +208,6 @@ public static class OllamaEndpoints
             ["messages"] = (req.Messages ?? new List<OllamaMessage>()).Select(ConvertMessage).ToList(),
             ["stream"] = isStream
         };
-        if (isStream)
-        {
-            // OpenAI-style streaming omits the `usage` block by default; opting in
-            // is required so we can fill the Ollama final frame's prompt_eval_count
-            // and eval_count, which VS Code uses to render the context-window gauge.
-            openAiRequest["stream_options"] = new { include_usage = true };
-        }
         if (req.Options is { } opts)
         {
             if (opts.Temperature is { } t) openAiRequest["temperature"] = t;
