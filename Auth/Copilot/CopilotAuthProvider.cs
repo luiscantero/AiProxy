@@ -67,19 +67,6 @@ public sealed class CopilotAuthProvider : IAuthProvider
         var modelsResult = await _modelsClient.ListAsync(copilot.Token, copilot.ApiBaseUrl, cancellationToken).ConfigureAwait(false);
         var models = modelsResult.Models;
 
-        // Dump raw response so the user can inspect upstream metadata for debugging.
-        try
-        {
-            var dumpPath = Path.Combine(Path.GetDirectoryName(_store.GetStoragePath(ProviderName))!, "last-models.json");
-            await File.WriteAllTextAsync(dumpPath, modelsResult.RawJson, cancellationToken).ConfigureAwait(false);
-            Console.WriteLine($"  Raw upstream models JSON written to: {dumpPath}");
-            Console.WriteLine();
-        }
-        catch (Exception ex)
-        {
-            _logger.LogDebug(ex, "Failed to write last-models.json (non-fatal).");
-        }
-
         if (models.Count == 0)
         {
             throw new InvalidOperationException("Upstream returned no usable models (after filtering for chat-capable / picker-enabled).");

@@ -1,6 +1,5 @@
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
-using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.Extensions.Options;
 
@@ -20,10 +19,6 @@ public sealed class CopilotModelsClient
         _options = options;
     }
 
-    /// <summary>
-    /// Returns the list of chat-capable, picker-enabled models, plus the raw upstream JSON
-    /// (so callers can persist it for diagnostics).
-    /// </summary>
     public async Task<ModelsResult> ListAsync(string copilotBearer, string? apiBaseUrl, CancellationToken cancellationToken)
     {
         var baseUrl = !string.IsNullOrEmpty(apiBaseUrl)
@@ -38,10 +33,7 @@ public sealed class CopilotModelsClient
         using var response = await _http.SendAsync(request, cancellationToken).ConfigureAwait(false);
         response.EnsureSuccessStatusCode();
 
-        var rawBytes = await response.Content.ReadAsByteArrayAsync(cancellationToken).ConfigureAwait(false);
-        var rawJson = System.Text.Encoding.UTF8.GetString(rawBytes);
-
-        var dto = JsonSerializer.Deserialize<ModelsResponse>(rawBytes)
+        var dto = await response.Content.ReadFromJsonAsync<ModelsResponse>(cancellationToken).ConfigureAwait(false)
                   ?? throw new InvalidOperationException("Empty models response.");
 
         var entries = dto.Data ?? new List<ModelEntry>();
@@ -81,10 +73,10 @@ public sealed class CopilotModelsClient
             .OrderBy(e => e.Id, StringComparer.Ordinal)
             .ToList();
 
-        return new ModelsResult(usable, rawJson);
+        return new ModelsResult(usable);
     }
 
-    public sealed record ModelsResult(IReadOnlyList<ModelEntry> Models, string RawJson);
+    public sealed record ModelsResult(IReadOnlyList<ModelEntry> Models);
 
     public sealed record ModelEntry(
         [property: JsonPropertyName("id")] string Id,

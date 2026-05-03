@@ -38,6 +38,7 @@ public static class OllamaEndpoints
         var selected = copilot is null
             ? Array.Empty<string>()
             : await copilot.GetSelectedModelsAsync(cancellationToken).ConfigureAwait(false);
+
         var infos = copilot is null
             ? new Dictionary<string, AiProxy.Storage.ModelInfo>()
             : await copilot.GetModelInfosAsync(cancellationToken).ConfigureAwait(false);
@@ -47,7 +48,7 @@ public static class OllamaEndpoints
         var models = selected.Select(id =>
         {
             infos.TryGetValue(id, out var info);
-            var family = info?.Family ?? "copilot";
+            var family = info?.Family is { Length: > 0 } f ? f.Replace('.', '_') : "copilot";
             return new
             {
                 name = id,
@@ -100,25 +101,32 @@ public static class OllamaEndpoints
 
         var infos = await copilot.GetModelInfosAsync(cancellationToken).ConfigureAwait(false);
         infos.TryGetValue(requested, out var info);
-        var family = info?.Family ?? "copilot";
+        var arch = "copilot";
+        var family = info?.Family is { Length: > 0 } f ? f.Replace('.', '_') : "copilot";
         var contextLength = info?.MaxContextWindowTokens ?? 0;
 
         var modelInfo = new Dictionary<string, object?>
         {
-            ["general.architecture"] = family,
-            ["general.basename"] = requested
+            ["general.architecture"] = arch,
+            ["general.basename"] = requested,
+            ["general.name"] = info?.Name ?? requested
         };
         if (contextLength > 0)
         {
-            // VS Code's Ollama provider reads `<arch>.context_length` to render the token gauge.
-            modelInfo[$"{family}.context_length"] = contextLength;
+            modelInfo[$"{arch}.context_length"] = contextLength;
+            // Belt-and-braces: a few clients read this generic key.
+            modelInfo["general.context_length"] = contextLength;
         }
+
+        // Expose context window via the Modelfile-style parameters field too — some
+        // Ollama clients read num_ctx from there to size the token gauge.
+        var parametersText = contextLength > 0 ? $"num_ctx {contextLength}\n" : "";
 
         return Results.Json(new
         {
             license = "",
             modelfile = $"# Proxied via AiProxy\nFROM {requested}\n",
-            parameters = "",
+            parameters = parametersText,
             template = "",
             details = new
             {
@@ -200,6 +208,13 @@ public static class OllamaEndpoints
             ["messages"] = (req.Messages ?? new List<OllamaMessage>()).Select(ConvertMessage).ToList(),
             ["stream"] = isStream
         };
+        if (isStream)
+        {
+            // OpenAI-style streaming omits the `usage` block by default; opting in
+            // is required so we can fill the Ollama final frame's prompt_eval_count
+            // and eval_count, which VS Code uses to render the context-window gauge.
+            openAiRequest["stream_options"] = new { include_usage = true };
+        }
         if (req.Options is { } opts)
         {
             if (opts.Temperature is { } t) openAiRequest["temperature"] = t;
