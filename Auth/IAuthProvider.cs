@@ -9,6 +9,12 @@ public interface IAuthProvider
     Task RunConnectAsync(CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Removes any persisted auth state for this provider.
+    /// Returns true if state existed and was removed; false if there was nothing to log out from.
+    /// </summary>
+    Task<bool> LogoutAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Returns a fresh upstream access token, refreshing if needed.
     /// Throws InvalidOperationException if no auth state exists.
     /// </summary>

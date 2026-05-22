@@ -143,6 +143,18 @@ public sealed class CopilotAuthProvider : IAuthProvider
         Console.WriteLine();
     }
 
+    public async Task<bool> LogoutAsync(CancellationToken cancellationToken = default)
+    {
+        var existing = await _store.LoadAsync(ProviderName, cancellationToken).ConfigureAwait(false);
+        if (existing is null)
+        {
+            return false;
+        }
+
+        await _store.DeleteAsync(ProviderName, cancellationToken).ConfigureAwait(false);
+        return true;
+    }
+
     public async Task<string> GetAccessTokenAsync(CancellationToken cancellationToken = default)
     {
         var state = await _store.LoadAsync(ProviderName, cancellationToken).ConfigureAwait(false)
