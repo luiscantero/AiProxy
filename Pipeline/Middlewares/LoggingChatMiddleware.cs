@@ -27,34 +27,72 @@ public sealed class LoggingChatMiddleware : IChatMiddleware
 
         var stopwatch = Stopwatch.StartNew();
 
+        // The model's advertised context window, so we can express actual usage as a percentage.
+        // This is the post-compression input that really reaches the upstream provider — unlike
+        // VS Code's gauge, which counts the un-compressed payload before it reaches the proxy.
+        int? maxContextWindow = null;
+        try
+        {
+            var infos = await context.Provider.GetModelInfosAsync(context.CancellationToken).ConfigureAwait(false);
+            if (infos.TryGetValue(context.Model, out var info))
+            {
+                maxContextWindow = info.MaxContextWindowTokens;
+            }
+        }
+        catch
+        {
+            // Model metadata is best-effort; never fail a chat over it.
+        }
+
         await next(context).ConfigureAwait(false);
 
         // Wrap the response stream so we can observe it without buffering the whole thing.
-        context.ResponseChunks = MeasureAsync(context, context.ResponseChunks, stopwatch);
+        context.ResponseChunks = MeasureAsync(context, context.ResponseChunks, stopwatch, maxContextWindow);
     }
 
     private static async IAsyncEnumerable<ChatResponseChunk> MeasureAsync(
         ChatPipelineContext context,
         IAsyncEnumerable<ChatResponseChunk> source,
         Stopwatch stopwatch,
+        int? maxContextWindow,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         var characters = 0;
         string? finishReason = null;
         int? completionTokens = null;
+        int? promptTokens = null;
 
         await foreach (var chunk in source.WithCancellation(cancellationToken).ConfigureAwait(false))
         {
             characters += chunk.ContentDelta?.Length ?? 0;
             finishReason ??= chunk.FinishReason;
             if (chunk.CompletionTokens is { } ct) completionTokens = ct;
+            if (chunk.PromptTokens is { } pt) promptTokens = pt;
 
             yield return chunk;
         }
 
         stopwatch.Stop();
+
+        // Actual context window usage: prompt tokens the upstream counted (post-compression),
+        // optionally as a percentage of the model's advertised window.
+        string contextUsage;
+        if (promptTokens is { } used && maxContextWindow is { } max && max > 0)
+        {
+            var percent = used * 100.0 / max;
+            contextUsage = $"{used}/{max} ({percent:0.#}%)";
+        }
+        else if (promptTokens is { } usedOnly)
+        {
+            contextUsage = usedOnly.ToString();
+        }
+        else
+        {
+            contextUsage = "?";
+        }
+
         context.Logger.LogInformation(
-            "Chat response: model={Model} chars={Characters} completionTokens={CompletionTokens} finish={Finish} elapsedMs={Elapsed}",
-            context.Model, characters, completionTokens, finishReason ?? "?", stopwatch.ElapsedMilliseconds);
+            "Chat response: model={Model} chars={Characters} promptTokens={PromptTokens} contextUsage={ContextUsage} completionTokens={CompletionTokens} finish={Finish} elapsedMs={Elapsed}",
+            context.Model, characters, promptTokens, contextUsage, completionTokens, finishReason ?? "?", stopwatch.ElapsedMilliseconds);
     }
 }
