@@ -39,3 +39,87 @@ Edit [appsettings.json](appsettings.json) (or `appsettings.Development.json`):
 
 Auth state (GitHub OAuth token, Copilot bearer, selected models) is stored
 locally and encrypted with Windows DPAPI — see [Storage/DpapiTokenStore.cs](Storage/DpapiTokenStore.cs).
+
+## Chat middleware pipeline
+
+Chat requests flow through a middleware pipeline modeled on
+[ASP.NET Core middleware](https://learn.microsoft.com/aspnet/core/fundamentals/middleware/).
+Both the OpenAI (`/v1/chat/completions`) and Ollama (`/api/chat`) endpoints are
+thin adapters: they translate the incoming wire format into a normalized,
+OpenAI-shaped request, run it through the pipeline, then serialize the
+normalized response back into the client's format. All cross-cutting logic
+(logging, prompt/response transforms) lives in middlewares — see the
+[Pipeline/](Pipeline) folder.
+
+A middleware can transform the request on the way **in** (before it reaches
+GitHub Copilot) and the response on the way **back** (before it reaches the
+client). This makes it possible to, for example, compress prompt tokens before
+they are sent upstream and decompress the response on the way back.
+
+```text
+client → [middleware A] → [middleware B] → UpstreamChatInvoker → Copilot
+client ← [middleware A] ← [middleware B] ← UpstreamChatInvoker ← Copilot
+```
+
+Middlewares run in registration order: the first registered is outermost, so
+request transforms apply outer→inner and response transforms inner→outer.
+
+### Writing a middleware
+
+Implement [IChatMiddleware](Pipeline/IChatMiddleware.cs). The context exposes the
+mutable OpenAI-shaped `UpstreamRequest` (a `JsonObject`) and the normalized
+`ResponseChunks` stream:
+
+```csharp
+public sealed class TokenCompressionMiddleware : IChatMiddleware
+{
+    public async Task InvokeAsync(ChatPipelineContext ctx, ChatMiddlewareDelegate next)
+    {
+        // On the way IN: rewrite the prompt before it is sent to Copilot.
+        if (ctx.UpstreamRequest["messages"] is JsonArray messages)
+        {
+            foreach (var msg in messages)
+                msg!["content"] = Compress(msg["content"]!.GetValue<string>());
+        }
+
+        await next(ctx);
+
+        // On the way BACK: wrap the response stream to transform it before the
+        // client sees it (e.g. decompress streamed content).
+        ctx.ResponseChunks = DecompressAsync(ctx.ResponseChunks);
+    }
+
+    private static string Compress(string text) => /* ... */ text;
+
+    private static async IAsyncEnumerable<ChatResponseChunk> DecompressAsync(
+        IAsyncEnumerable<ChatResponseChunk> source)
+    {
+        await foreach (var chunk in source)
+        {
+            if (chunk.ContentDelta is { } content)
+                chunk.ContentDelta = Decompress(content);
+            yield return chunk;
+        }
+    }
+
+    private static string Decompress(string text) => /* ... */ text;
+}
+```
+
+Because the response is an `IAsyncEnumerable<ChatResponseChunk>`, an outbound
+transform can also buffer content across streaming chunks if it needs more than
+a single delta at a time.
+
+### Registering a middleware
+
+Add it to the pipeline in `ServiceRegistration.Configure`
+([Commands/ProxyCommand.cs](Commands/ProxyCommand.cs)). The shipped
+[LoggingChatMiddleware](Pipeline/Middlewares/LoggingChatMiddleware.cs) is a
+reference example that logs each request and the streamed response:
+
+```csharp
+services.AddSingleton<UpstreamChatInvoker>();
+services.AddSingleton<IChatMiddleware, LoggingChatMiddleware>();
+services.AddSingleton<IChatMiddleware, TokenCompressionMiddleware>(); // your middleware
+services.AddSingleton<ChatPipeline>();
+```
