@@ -67,6 +67,44 @@ public sealed class CopilotAuthProvider : IAuthProvider
         var modelsResult = await _modelsClient.ListAsync(copilot.Token, copilot.ApiBaseUrl, cancellationToken).ConfigureAwait(false);
         var models = modelsResult.Models;
 
+        var state = new AuthState
+        {
+            Provider = ProviderName,
+            GhOAuthToken = ghToken,
+            CopilotToken = copilot.Token,
+            CopilotTokenExpiresAt = copilot.ExpiresAt,
+            UpstreamApiBaseUrl = copilot.ApiBaseUrl
+        };
+
+        await SelectModelsAndSaveAsync(state, models, existing, cancellationToken).ConfigureAwait(false);
+    }
+
+    public async Task RunSelectModelsAsync(CancellationToken cancellationToken = default)
+    {
+        var existing = await _store.LoadAsync(ProviderName, cancellationToken).ConfigureAwait(false)
+            ?? throw new InvalidOperationException(
+                "No Copilot auth state found. Run 'AiProxy connect copilot' first.");
+
+        Console.WriteLine();
+        Console.WriteLine("== AiProxy: Select Copilot models ==");
+        Console.WriteLine();
+
+        // Ensure a valid bearer (refreshes if needed) and pick up any updated API base URL.
+        var token = await GetAccessTokenAsync(cancellationToken).ConfigureAwait(false);
+        var apiBaseUrl = await GetUpstreamApiBaseUrlAsync(cancellationToken).ConfigureAwait(false);
+
+        var modelsResult = await _modelsClient.ListAsync(token, apiBaseUrl, cancellationToken).ConfigureAwait(false);
+        var models = modelsResult.Models;
+
+        await SelectModelsAndSaveAsync(existing, models, existing, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task SelectModelsAndSaveAsync(
+        AuthState baseState,
+        IReadOnlyList<CopilotModelsClient.ModelEntry> models,
+        AuthState? existing,
+        CancellationToken cancellationToken)
+    {
         if (models.Count == 0)
         {
             throw new InvalidOperationException("Upstream returned no usable models (after filtering for chat-capable / picker-enabled).");
@@ -125,13 +163,8 @@ public sealed class CopilotAuthProvider : IAuthProvider
             },
             StringComparer.Ordinal);
 
-        var state = new AuthState
+        var state = baseState with
         {
-            Provider = ProviderName,
-            GhOAuthToken = ghToken,
-            CopilotToken = copilot.Token,
-            CopilotTokenExpiresAt = copilot.ExpiresAt,
-            UpstreamApiBaseUrl = copilot.ApiBaseUrl,
             SelectedModels = selected,
             ModelInfos = modelInfos
         };

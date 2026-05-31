@@ -70,6 +70,8 @@ internal sealed class FakeAuthProvider : IAuthProvider
 
     public Task RunConnectAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
 
+    public Task RunSelectModelsAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+
     public Task<bool> LogoutAsync(CancellationToken cancellationToken = default) => Task.FromResult(false);
 
     public Task<string> GetAccessTokenAsync(CancellationToken cancellationToken = default) =>

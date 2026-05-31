@@ -10,6 +10,7 @@ editors, or scripts at `http://localhost:11434` and bring your own AI models.
 ```text
 AiProxy                       Start proxy mode (default).
 AiProxy connect [provider]    Run the connect workflow (default: copilot).
+AiProxy models  [provider]    Re-select models for a connected provider (default: copilot).
 AiProxy logout  [provider]    Remove stored auth state (default: copilot).
 AiProxy help                  Show usage.
 ```
@@ -25,6 +26,14 @@ To sign out and delete the stored token:
 
 ```pwsh
 dotnet run -- logout
+```
+
+To change which models a connected provider exposes without re-authenticating,
+re-run just the model picker:
+
+```pwsh
+dotnet run -- models           # re-select Copilot models
+dotnet run -- models openrouter # re-select models for another provider
 ```
 
 ## Configuration

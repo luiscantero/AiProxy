@@ -79,6 +79,42 @@ public sealed class OpenAiCompatibleAuthProvider : IAuthProvider
             throw new InvalidOperationException("Upstream returned no models.");
         }
 
+        await SelectModelsAndSaveAsync(apiKey, models, existing, cancellationToken).ConfigureAwait(false);
+    }
+
+    public async Task RunSelectModelsAsync(CancellationToken cancellationToken = default)
+    {
+        var existing = await _store.LoadAsync(Name, cancellationToken).ConfigureAwait(false);
+        var apiKey = existing?.ApiKey is { Length: > 0 } stored
+            ? stored
+            : (string.IsNullOrEmpty(_config.ApiKey) ? null : _config.ApiKey);
+
+        if (apiKey is null)
+        {
+            throw new InvalidOperationException(
+                $"No API key for '{Name}'. Run 'AiProxy connect {Name}' first.");
+        }
+
+        Console.WriteLine();
+        Console.WriteLine($"== AiProxy: Select {Name} models ({_config.BaseUrl}) ==");
+        Console.WriteLine();
+
+        Console.WriteLine("  Fetching available models...");
+        var models = await _modelsClient.ListAsync(_config.BaseUrl, apiKey, cancellationToken).ConfigureAwait(false);
+        if (models.Count == 0)
+        {
+            throw new InvalidOperationException("Upstream returned no models.");
+        }
+
+        await SelectModelsAndSaveAsync(apiKey, models, existing, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task SelectModelsAndSaveAsync(
+        string apiKey,
+        IReadOnlyList<OpenAiCompatibleModelsClient.ModelEntry> models,
+        AuthState? existing,
+        CancellationToken cancellationToken)
+    {
         Console.WriteLine();
         Console.WriteLine("Available models:");
         for (var i = 0; i < models.Count; i++)

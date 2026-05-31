@@ -33,6 +33,15 @@ switch (args[0].ToLowerInvariant())
         return await ConnectCommand.RunAsync(host.Services, args, cts.Token).ConfigureAwait(false);
     }
 
+    case "models":
+    {
+        var builder = Host.CreateApplicationBuilder(args);
+        ServiceRegistration.Configure(builder.Services, builder.Configuration);
+        builder.Logging.AddFilter("System.Net.Http.HttpClient", LogLevel.Warning);
+        using var host = builder.Build();
+        return await ModelsCommand.RunAsync(host.Services, args, cts.Token).ConfigureAwait(false);
+    }
+
     case "logout":
     {
         var builder = Host.CreateApplicationBuilder(args);
@@ -62,6 +71,7 @@ static void PrintUsage()
     Console.WriteLine("Usage:");
     Console.WriteLine("  AiProxy                       Start proxy mode (default).");
     Console.WriteLine("  AiProxy connect [provider]    Run a connect workflow (default provider: copilot).");
+    Console.WriteLine("  AiProxy models  [provider]    Re-select models for a connected provider (default: copilot).");
     Console.WriteLine("  AiProxy logout  [provider]    Remove stored auth state (default provider: copilot).");
     Console.WriteLine("  AiProxy help                  Show this message.");
     Console.WriteLine();

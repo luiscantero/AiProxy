@@ -10,6 +10,13 @@ public interface IAuthProvider
     Task RunConnectAsync(CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Re-runs only the model-selection step against the upstream using the existing
+    /// stored auth state, without repeating the connect/login flow.
+    /// Throws InvalidOperationException if the provider is not connected yet.
+    /// </summary>
+    Task RunSelectModelsAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Removes any persisted auth state for this provider.
     /// Returns true if state existed and was removed; false if there was nothing to log out from.
     /// </summary>

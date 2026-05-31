@@ -80,6 +80,7 @@ public class ProviderResolverTests
         public string AccessToken { get; init; } = "token";
 
         public Task RunConnectAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+        public Task RunSelectModelsAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
         public Task<bool> LogoutAsync(CancellationToken cancellationToken = default) => Task.FromResult(false);
         public Task<string> GetAccessTokenAsync(CancellationToken cancellationToken = default) => Task.FromResult(AccessToken);
         public Task<IReadOnlyList<string>> GetSelectedModelsAsync(CancellationToken cancellationToken = default) => Task.FromResult(_models);
