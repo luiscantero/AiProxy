@@ -161,12 +161,55 @@ unchanged, so a middleware can never break a request.
 | [CacheAlignerMiddleware](Pipeline/Middlewares/CacheAlignerMiddleware.cs) | Stabilizes the cacheable **system-prompt prefix**. Volatile tokens (dates, ISO timestamps, UUIDs, epoch seconds) in the system message cause a provider KV-cache miss on every call; they are rewritten to fixed placeholders (`<DATE>`, `<TIMESTAMP>`, `<UUID>`, `<EPOCH>`) so the prefix stays byte-stable. Only system messages are touched. |
 | [JsonCrusherMiddleware](Pipeline/Middlewares/JsonCrusherMiddleware.cs) | Losslessly **minifies embedded JSON** (tool outputs, API responses, DB rows) found inside message content. It locates balanced JSON spans, re-serializes them compactly, and only replaces a span when the result is strictly shorter. No keys, nulls, or values are dropped. |
 | [LogCompressorMiddleware](Pipeline/Middlewares/LogCompressorMiddleware.cs) | **Squashes log blocks.** When content looks like logs, it collapses consecutive duplicate lines (ignoring volatile timestamps) and thins long runs of low-severity `TRACE`/`DEBUG`/`INFO` lines, while always preserving `WARN`/`ERROR`/`FATAL`/`CRITICAL` lines and stack traces. |
+| [CavemanMiddleware](Pipeline/Middlewares/CavemanMiddleware.cs) | **LLM-driven natural-language compression** (opt-in). Delegates [caveman compression](https://github.com/lcantero/caveman-compression) to a configured model (typically a local Ollama) to strip grammar/filler from prompt content while preserving facts, then optionally expands caveman replies back to fluent prose. See [Caveman compression](#caveman-compression-middleware) below. |
 
 These run after `LoggingChatMiddleware` (which stays outermost so it reports the
 request as the client sent it). Because each is fail-open and only engages when
 its content pattern is detected, the order among them is not critical;
 `CacheAligner` is placed first so it sees the system prompt before any other
 rewrite.
+
+#### Caveman compression middleware
+
+Unlike the mechanical transforms above, *caveman compression* is a
+natural-language transform, so it can't be done with regexes — it needs a model.
+The [CavemanMiddleware](Pipeline/Middlewares/CavemanMiddleware.cs) therefore
+delegates the work to a second, configurable provider (the
+[ICavemanTransformer](Pipeline/Middlewares/CavemanTransformer.cs) issues a plain
+`/chat/completions` call against it). Point it at a cheap **local model** so the
+compression doesn't cost more than it saves.
+
+- **Inbound** — selected prompt messages (default: `user` role) are rewritten
+  into terse caveman form before they reach the upstream model, cutting prompt
+  tokens. The rewrite is only kept when it is actually shorter than the original.
+- **Outbound** — optionally expands caveman text in the assistant reply back to
+  fluent prose. Because that needs the whole message, the streamed response is
+  buffered, expanded once, then re-emitted. Leave this **off** unless you also
+  instruct the upstream to answer in caveman form (otherwise normal prose is
+  needlessly round-tripped). Tool-call responses are never decompressed.
+
+It is **fail-open**: a missing/misconfigured provider or any error leaves the
+content untouched.
+
+Configure it under `Caveman` in `appsettings.json` (the `Provider` must match a
+registered Copilot or `OpenAiProviders` entry — e.g. a local Ollama added there):
+
+```jsonc
+"OpenAiProviders": [
+  { "Name": "ollama", "BaseUrl": "http://localhost:11434/v1" }
+],
+"Caveman": {
+  "Enabled": true,
+  "Provider": "ollama",        // which registered provider performs the transform
+  "Model": "llama3.1:8b",      // model the compressor provider should use
+  "CompressRequests": true,    // caveman-compress prompts on the way upstream
+  "DecompressResponses": false, // expand caveman replies on the way downstream
+  "Roles": [ "user" ],         // which message roles to compress
+  "MinCharacters": 400          // skip content shorter than this
+}
+```
+
+
 
 #### Ideas for future middlewares
 

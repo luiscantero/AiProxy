@@ -154,10 +154,14 @@ internal static class ServiceRegistration
         //   CacheAligner  — stabilizes the system-prompt prefix so provider KV caches hit.
         //   JsonCrusher   — losslessly minifies embedded JSON (tool outputs, API/DB payloads).
         //   LogCompressor — squashes redundant log blocks (dupes + low-severity runs).
+        //   Caveman       — LLM-driven natural-language compression (opt-in via Caveman.Enabled).
         services.AddSingleton<IChatMiddleware, LoggingChatMiddleware>();
         services.AddSingleton<IChatMiddleware, CacheAlignerMiddleware>();
         services.AddSingleton<IChatMiddleware, JsonCrusherMiddleware>();
         services.AddSingleton<IChatMiddleware, LogCompressorMiddleware>();
+
+        services.AddSingleton<ICavemanTransformer, CavemanTransformer>();
+        services.AddSingleton<IChatMiddleware, CavemanMiddleware>();
 
         services.AddSingleton<ChatPipeline>();
     }
