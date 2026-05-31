@@ -1,3 +1,4 @@
+using System.Net.Http.Headers;
 using AiProxy.Storage;
 
 namespace AiProxy.Auth;
@@ -36,4 +37,18 @@ public interface IAuthProvider
     /// May return null if no auth state has been established yet.
     /// </summary>
     Task<string?> GetUpstreamApiBaseUrlAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Applies provider-specific authentication and headers to an outgoing upstream
+    /// <c>/chat/completions</c> request. The default implementation sets a
+    /// <c>Bearer</c> Authorization header from <see cref="GetAccessTokenAsync"/>; providers
+    /// that need a different scheme or extra headers (e.g. GitHub Copilot's editor headers)
+    /// override this. This is the single seam the terminal invoker uses, so adding a new
+    /// provider never requires touching the invoker.
+    /// </summary>
+    async Task PrepareUpstreamRequestAsync(HttpRequestMessage request, CancellationToken cancellationToken = default)
+    {
+        var token = await GetAccessTokenAsync(cancellationToken).ConfigureAwait(false);
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+    }
 }

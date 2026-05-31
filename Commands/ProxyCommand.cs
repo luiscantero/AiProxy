@@ -1,5 +1,6 @@
 using AiProxy.Auth;
 using AiProxy.Auth.Copilot;
+using AiProxy.Auth.OpenAiCompatible;
 using AiProxy.Pipeline;
 using AiProxy.Pipeline.Middlewares;
 using AiProxy.Proxy;
@@ -77,18 +78,18 @@ public static class ProxyCommand
             Console.WriteLine("  WARNING      : Both Apis.Ollama and Apis.OpenAi are disabled. No routes are exposed.");
         }
 
-        // Warn if no auth state.
-        var copilot = app.Services.GetServices<IAuthProvider>().FirstOrDefault(p => p.Name == CopilotAuthProvider.ProviderName);
-        if (copilot is not null)
+        // Warn if no auth state, listing models per connected provider.
+        var byProvider = await ProviderResolver.ListAllAsync(
+            app.Services.GetServices<IAuthProvider>(), cancellationToken).ConfigureAwait(false);
+        if (byProvider.Count == 0)
         {
-            var models = await copilot.GetSelectedModelsAsync(cancellationToken).ConfigureAwait(false);
-            if (models.Count == 0)
+            Console.WriteLine("  WARNING      : No connected providers. Run 'AiProxy connect <provider>' first.");
+        }
+        else
+        {
+            foreach (var (provider, models) in byProvider)
             {
-                Console.WriteLine("  WARNING      : No Copilot auth state found. Run 'AiProxy connect copilot' first.");
-            }
-            else
-            {
-                Console.WriteLine($"  Models       : {string.Join(", ", models)}");
+                Console.WriteLine($"  {provider.Name,-12} : {string.Join(", ", models)}");
             }
         }
         Console.WriteLine();
@@ -116,10 +117,30 @@ internal static class ServiceRegistration
         services.AddHttpClient<DeviceFlowClient>();
         services.AddHttpClient<CopilotTokenClient>();
         services.AddHttpClient<CopilotModelsClient>();
+        services.AddHttpClient<OpenAiCompatibleModelsClient>();
         services.AddHttpClient("upstream");
 
         services.AddSingleton<CopilotAuthProvider>();
         services.AddSingleton<IAuthProvider>(sp => sp.GetRequiredService<CopilotAuthProvider>());
+
+        // Register one OpenAI-compatible provider per configured upstream (OpenAI, OpenRouter,
+        // Groq, DeepSeek, ...). This is the extension point: adding a provider is configuration
+        // only — drop an entry under "OpenAiProviders" in appsettings and it lights up.
+        var openAiProviders = configuration.GetSection(nameof(AiProxyOptions.OpenAiProviders))
+            .Get<List<OpenAiCompatibleProviderOptions>>() ?? new List<OpenAiCompatibleProviderOptions>();
+        foreach (var providerConfig in openAiProviders)
+        {
+            if (string.IsNullOrWhiteSpace(providerConfig.Name) || string.IsNullOrWhiteSpace(providerConfig.BaseUrl))
+            {
+                continue;
+            }
+
+            services.AddSingleton<IAuthProvider>(sp => new OpenAiCompatibleAuthProvider(
+                providerConfig,
+                sp.GetRequiredService<ITokenStore>(),
+                sp.GetRequiredService<OpenAiCompatibleModelsClient>(),
+                sp.GetRequiredService<ILoggerFactory>().CreateLogger($"AiProxy.Provider.{providerConfig.Name}")));
+        }
 
         // Chat pipeline: the terminal upstream invoker plus an ordered list of middlewares.
         // Add your own IChatMiddleware registrations here; they run in registration order

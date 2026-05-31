@@ -223,6 +223,14 @@ public sealed class CopilotAuthProvider : IAuthProvider
         return state?.UpstreamApiBaseUrl;
     }
 
+    public async Task PrepareUpstreamRequestAsync(HttpRequestMessage request, CancellationToken cancellationToken = default)
+    {
+        var token = await GetAccessTokenAsync(cancellationToken).ConfigureAwait(false);
+        request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
+        CopilotHeaders.Apply(request);
+        request.Headers.TryAddWithoutValidation("OpenAI-Intent", "conversation-panel");
+    }
+
     private static IReadOnlyList<string> ParseSelection(string input, IReadOnlyList<CopilotModelsClient.ModelEntry> models)
     {
         if (string.IsNullOrWhiteSpace(input))

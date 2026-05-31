@@ -6,6 +6,12 @@ public sealed record AuthState
     public string? GhOAuthToken { get; init; }
     public string? CopilotToken { get; init; }
     public DateTimeOffset? CopilotTokenExpiresAt { get; init; }
+
+    /// <summary>
+    /// API key for simple bearer-token providers (OpenAI-compatible: OpenAI, OpenRouter,
+    /// Groq, DeepSeek, ...). Stored encrypted alongside the other state.
+    /// </summary>
+    public string? ApiKey { get; init; }
     /// <summary>
     /// Upstream API base URL returned by the Copilot token exchange (endpoints.api).
     /// Differs by plan: individual / business / enterprise.

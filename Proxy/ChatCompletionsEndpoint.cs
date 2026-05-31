@@ -2,7 +2,6 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using AiProxy.Auth;
-using AiProxy.Auth.Copilot;
 using AiProxy.Pipeline;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
@@ -30,13 +29,6 @@ public static class ChatCompletionsEndpoint
         var logger = loggerFactory.CreateLogger("AiProxy.Proxy.Chat");
         var cancellationToken = context.RequestAborted;
 
-        var copilot = providers.FirstOrDefault(p => p.Name == CopilotAuthProvider.ProviderName);
-        if (copilot is null)
-        {
-            await WriteErrorAsync(context, StatusCodes.Status500InternalServerError, "Copilot provider not registered.", "server_error");
-            return;
-        }
-
         // Parse the body into a mutable JSON object so middlewares can rewrite it. Because the
         // OpenAI surface is already OpenAI-shaped, the parsed body *is* the upstream request.
         using var ms = new MemoryStream();
@@ -63,14 +55,8 @@ public static class ChatCompletionsEndpoint
             return;
         }
 
-        var allowedModels = await copilot.GetSelectedModelsAsync(cancellationToken).ConfigureAwait(false);
-        if (allowedModels.Count == 0)
-        {
-            await WriteErrorAsync(context, StatusCodes.Status503ServiceUnavailable,
-                "No models available. Run 'AiProxy connect copilot' first.", "service_unavailable");
-            return;
-        }
-        if (!allowedModels.Contains(requestedModel))
+        var provider = await ProviderResolver.ResolveForModelAsync(providers, requestedModel, cancellationToken).ConfigureAwait(false);
+        if (provider is null)
         {
             await WriteErrorAsync(context, StatusCodes.Status404NotFound,
                 $"Model '{requestedModel}' is not exposed by this proxy.", "model_not_found");
@@ -84,7 +70,7 @@ public static class ChatCompletionsEndpoint
             Model = requestedModel,
             IsStreaming = isStream,
             UpstreamRequest = upstreamRequest,
-            Provider = copilot,
+            Provider = provider,
             Logger = logger
         };
 

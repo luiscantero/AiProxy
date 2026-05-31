@@ -1,7 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using AiProxy.Auth;
-using AiProxy.Auth.Copilot;
 using AiProxy.Pipeline;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
@@ -34,39 +33,36 @@ public static class OllamaEndpoints
     // ----------------------------------------------------------------------
     public static async Task<IResult> Tags(IEnumerable<IAuthProvider> providers, CancellationToken cancellationToken)
     {
-        var copilot = providers.FirstOrDefault(p => p.Name == CopilotAuthProvider.ProviderName);
-        var selected = copilot is null
-            ? Array.Empty<string>()
-            : await copilot.GetSelectedModelsAsync(cancellationToken).ConfigureAwait(false);
-
-        var infos = copilot is null
-            ? new Dictionary<string, AiProxy.Storage.ModelInfo>()
-            : await copilot.GetModelInfosAsync(cancellationToken).ConfigureAwait(false);
-
+        var byProvider = await ProviderResolver.ListAllAsync(providers, cancellationToken).ConfigureAwait(false);
         var modifiedAt = DateTimeOffset.UtcNow.ToString("yyyy-MM-ddTHH:mm:ss.fffffffK");
 
-        var models = selected.Select(id =>
+        var models = new List<object>();
+        foreach (var (provider, ids) in byProvider)
         {
-            infos.TryGetValue(id, out var info);
-            var family = info?.Family is { Length: > 0 } f ? f.Replace('.', '_') : "copilot";
-            return new
+            var infos = await provider.GetModelInfosAsync(cancellationToken).ConfigureAwait(false);
+            foreach (var id in ids)
             {
-                name = id,
-                model = id,
-                modified_at = modifiedAt,
-                size = 0L,
-                digest = "",
-                details = new
+                infos.TryGetValue(id, out var info);
+                var family = info?.Family is { Length: > 0 } f ? f.Replace('.', '_') : provider.Name;
+                models.Add(new
                 {
-                    parent_model = "",
-                    format = "gguf",
-                    family,
-                    families = new[] { family },
-                    parameter_size = "",
-                    quantization_level = ""
-                }
-            };
-        });
+                    name = id,
+                    model = id,
+                    modified_at = modifiedAt,
+                    size = 0L,
+                    digest = "",
+                    details = new
+                    {
+                        parent_model = "",
+                        format = "gguf",
+                        family,
+                        families = new[] { family },
+                        parameter_size = "",
+                        quantization_level = ""
+                    }
+                });
+            }
+        }
 
         return Results.Json(new { models });
     }
@@ -76,12 +72,6 @@ public static class OllamaEndpoints
     // ----------------------------------------------------------------------
     public static async Task<IResult> Show(HttpContext context, IEnumerable<IAuthProvider> providers, CancellationToken cancellationToken)
     {
-        var copilot = providers.FirstOrDefault(p => p.Name == CopilotAuthProvider.ProviderName);
-        if (copilot is null)
-        {
-            return Results.Json(new { error = "Copilot provider not registered." }, statusCode: 500);
-        }
-
         using var doc = await JsonDocument.ParseAsync(context.Request.Body, cancellationToken: cancellationToken).ConfigureAwait(false);
         string? requested = null;
         if (doc.RootElement.TryGetProperty("model", out var m1) && m1.ValueKind == JsonValueKind.String)
@@ -93,16 +83,21 @@ public static class OllamaEndpoints
             requested = m2.GetString();
         }
 
-        var selected = await copilot.GetSelectedModelsAsync(cancellationToken).ConfigureAwait(false);
-        if (string.IsNullOrEmpty(requested) || !selected.Contains(requested))
+        if (string.IsNullOrEmpty(requested))
         {
             return Results.Json(new { error = "model not found" }, statusCode: 404);
         }
 
-        var infos = await copilot.GetModelInfosAsync(cancellationToken).ConfigureAwait(false);
+        var provider = await ProviderResolver.ResolveForModelAsync(providers, requested, cancellationToken).ConfigureAwait(false);
+        if (provider is null)
+        {
+            return Results.Json(new { error = "model not found" }, statusCode: 404);
+        }
+
+        var infos = await provider.GetModelInfosAsync(cancellationToken).ConfigureAwait(false);
         infos.TryGetValue(requested, out var info);
-        var arch = "copilot";
-        var family = info?.Family is { Length: > 0 } f ? f.Replace('.', '_') : "copilot";
+        var arch = provider.Name;
+        var family = info?.Family is { Length: > 0 } f ? f.Replace('.', '_') : provider.Name;
         var contextLength = info?.MaxContextWindowTokens ?? 0;
 
         var modelInfo = new Dictionary<string, object?>
@@ -157,13 +152,6 @@ public static class OllamaEndpoints
         var logger = loggerFactory.CreateLogger("AiProxy.Ollama.Chat");
         var cancellationToken = context.RequestAborted;
 
-        var copilot = providers.FirstOrDefault(p => p.Name == CopilotAuthProvider.ProviderName);
-        if (copilot is null)
-        {
-            await WriteJsonErrorAsync(context, 500, "Copilot provider not registered.");
-            return;
-        }
-
         // Parse Ollama request.
         OllamaChatRequest req;
         try
@@ -185,13 +173,8 @@ public static class OllamaEndpoints
             return;
         }
 
-        var allowed = await copilot.GetSelectedModelsAsync(cancellationToken).ConfigureAwait(false);
-        if (allowed.Count == 0)
-        {
-            await WriteJsonErrorAsync(context, 503, "No models available. Run 'AiProxy connect copilot' first.");
-            return;
-        }
-        if (!allowed.Contains(req.Model))
+        var provider = await ProviderResolver.ResolveForModelAsync(providers, req.Model, cancellationToken).ConfigureAwait(false);
+        if (provider is null)
         {
             await WriteJsonErrorAsync(context, 404, $"model '{req.Model}' not found");
             return;
@@ -239,7 +222,7 @@ public static class OllamaEndpoints
             Model = req.Model,
             IsStreaming = isStream,
             UpstreamRequest = upstreamRequest,
-            Provider = copilot,
+            Provider = provider,
             Logger = logger
         };
 

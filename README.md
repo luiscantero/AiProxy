@@ -1,6 +1,7 @@
 # AiProxy
 
-A small local proxy that exposes your GitHub Copilot subscription through an
+A small local proxy that exposes your GitHub Copilot subscription — and any
+OpenAI-compatible provider (OpenAI, OpenRouter, Groq, DeepSeek, ...) — through an
 OpenAI- and Ollama-shaped HTTP API, so you can point tools like VS Code,
 editors, or scripts at `http://localhost:11434` and bring your own AI models.
 
@@ -36,9 +37,26 @@ Edit [appsettings.json](appsettings.json) (or `appsettings.Development.json`):
 - `Copilot:ClientId` / `Copilot:UpstreamBaseUrl` — Copilot device-flow client
   and upstream API base. The defaults work for normal Copilot accounts.
 - `Apis:Ollama` / `Apis:OpenAi` — toggle which API surfaces are exposed.
+- `OpenAiProviders` — a list of OpenAI-compatible upstreams to expose (OpenAI,
+  OpenRouter, Groq, DeepSeek, xAI, Gemini's OpenAI endpoint, local runtimes,
+  ...). Each entry needs a `Name` and `BaseUrl`; adding one is configuration
+  only. Connect to it with `AiProxy connect <name>` to store an API key
+  (encrypted) and pick models. A key can also be supplied inline via `ApiKey`
+  for non-interactive setups (stored in plaintext, so prefer `connect`).
 
-Auth state (GitHub OAuth token, Copilot bearer, selected models) is stored
-locally and encrypted with Windows DPAPI — see [Storage/DpapiTokenStore.cs](Storage/DpapiTokenStore.cs).
+```jsonc
+"OpenAiProviders": [
+  { "Name": "openai",     "BaseUrl": "https://api.openai.com/v1" },
+  { "Name": "openrouter", "BaseUrl": "https://openrouter.ai/api/v1" }
+]
+```
+
+Models from every connected provider are merged into the same `/v1/models` and
+`/api/tags` catalog, and chat requests are routed to the owning provider by the
+requested model id.
+
+Auth state (GitHub OAuth token, Copilot bearer, API keys, selected models) is
+stored locally and encrypted with Windows DPAPI — see [Storage/DpapiTokenStore.cs](Storage/DpapiTokenStore.cs).
 
 ## Chat middleware pipeline
 

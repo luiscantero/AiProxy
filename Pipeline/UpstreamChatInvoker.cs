@@ -1,7 +1,6 @@
 using System.Net.Http.Headers;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
-using AiProxy.Auth.Copilot;
 using Microsoft.Extensions.Options;
 
 namespace AiProxy.Pipeline;
@@ -29,7 +28,6 @@ public sealed class UpstreamChatInvoker
     {
         var cancellationToken = context.CancellationToken;
 
-        var bearer = await context.Provider.GetAccessTokenAsync(cancellationToken).ConfigureAwait(false);
         var baseUrl = await context.Provider.GetUpstreamApiBaseUrlAsync(cancellationToken).ConfigureAwait(false)
                       ?? _options.Value.Copilot.UpstreamBaseUrl;
         var url = baseUrl.TrimEnd('/') + "/chat/completions";
@@ -42,11 +40,12 @@ public sealed class UpstreamChatInvoker
             Content = new ByteArrayContent(bodyBytes)
         };
         request.Content.Headers.ContentType = new MediaTypeHeaderValue("application/json");
-        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", bearer);
         request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue(
             context.IsStreaming ? "text/event-stream" : "application/json"));
-        CopilotHeaders.Apply(request);
-        request.Headers.TryAddWithoutValidation("OpenAI-Intent", "conversation-panel");
+
+        // The provider owns authentication and any provider-specific headers, so this terminal
+        // stage stays wire-format-only and never needs to change when a new provider is added.
+        await context.Provider.PrepareUpstreamRequestAsync(request, cancellationToken).ConfigureAwait(false);
 
         var response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken)
             .ConfigureAwait(false);
