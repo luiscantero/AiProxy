@@ -119,7 +119,46 @@ reference example that logs each request and the streamed response:
 
 ```csharp
 services.AddSingleton<UpstreamChatInvoker>();
+
+// Registration order = execution order (outermost first).
 services.AddSingleton<IChatMiddleware, LoggingChatMiddleware>();
+services.AddSingleton<IChatMiddleware, CacheAlignerMiddleware>();
+services.AddSingleton<IChatMiddleware, JsonCrusherMiddleware>();
+services.AddSingleton<IChatMiddleware, LogCompressorMiddleware>();
 services.AddSingleton<IChatMiddleware, TokenCompressionMiddleware>(); // your middleware
+
 services.AddSingleton<ChatPipeline>();
 ```
+
+### Built-in token-saving middlewares
+
+The pipeline ships with a set of inbound transforms inspired by
+[Headroom](https://github.com/chopratejas/headroom). Each one shrinks the prompt
+**before** it is sent to GitHub Copilot, and each is **fail-open**: any
+unexpected error is logged at debug level and the original request is forwarded
+unchanged, so a middleware can never break a request.
+
+| Middleware | What it does |
+| --- | --- |
+| [CacheAlignerMiddleware](Pipeline/Middlewares/CacheAlignerMiddleware.cs) | Stabilizes the cacheable **system-prompt prefix**. Volatile tokens (dates, ISO timestamps, UUIDs, epoch seconds) in the system message cause a provider KV-cache miss on every call; they are rewritten to fixed placeholders (`<DATE>`, `<TIMESTAMP>`, `<UUID>`, `<EPOCH>`) so the prefix stays byte-stable. Only system messages are touched. |
+| [JsonCrusherMiddleware](Pipeline/Middlewares/JsonCrusherMiddleware.cs) | Losslessly **minifies embedded JSON** (tool outputs, API responses, DB rows) found inside message content. It locates balanced JSON spans, re-serializes them compactly, and only replaces a span when the result is strictly shorter. No keys, nulls, or values are dropped. |
+| [LogCompressorMiddleware](Pipeline/Middlewares/LogCompressorMiddleware.cs) | **Squashes log blocks.** When content looks like logs, it collapses consecutive duplicate lines (ignoring volatile timestamps) and thins long runs of low-severity `TRACE`/`DEBUG`/`INFO` lines, while always preserving `WARN`/`ERROR`/`FATAL`/`CRITICAL` lines and stack traces. |
+
+These run after `LoggingChatMiddleware` (which stays outermost so it reports the
+request as the client sent it). Because each is fail-open and only engages when
+its content pattern is detected, the order among them is not critical;
+`CacheAligner` is placed first so it sees the system prompt before any other
+rewrite.
+
+#### Ideas for future middlewares
+
+Other Headroom-style stages that fit this architecture:
+
+- **CodeCompressor** — AST-aware compression of fenced code blocks.
+- **CCR (Compress-Cache-Retrieve)** — store originals locally (we already have
+  DPAPI storage) and replace compressed spans with markers the model can expand
+  on demand via a tool/endpoint; this makes lossy squashers safe.
+- **ConversationDelta** — for multi-turn chats, send only what changed since the
+  previous turn instead of resending the whole history.
+- **RelevanceSquasher** — statistically drop low-signal middle context.
+

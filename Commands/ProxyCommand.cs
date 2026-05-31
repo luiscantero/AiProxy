@@ -126,7 +126,18 @@ internal static class ServiceRegistration
         // (outermost first), so a middleware can transform the request on the way to Copilot
         // and the response on the way back to the client (e.g. compress / decompress).
         services.AddSingleton<UpstreamChatInvoker>();
+
+        // --- Chat middleware pipeline (registration order = execution order, outermost first) ---
+        // Logging sits outermost so it observes the request as the client sent it and the final
+        // response. The token-saving transforms then run inbound before the upstream call:
+        //   CacheAligner  — stabilizes the system-prompt prefix so provider KV caches hit.
+        //   JsonCrusher   — losslessly minifies embedded JSON (tool outputs, API/DB payloads).
+        //   LogCompressor — squashes redundant log blocks (dupes + low-severity runs).
         services.AddSingleton<IChatMiddleware, LoggingChatMiddleware>();
+        services.AddSingleton<IChatMiddleware, CacheAlignerMiddleware>();
+        services.AddSingleton<IChatMiddleware, JsonCrusherMiddleware>();
+        services.AddSingleton<IChatMiddleware, LogCompressorMiddleware>();
+
         services.AddSingleton<ChatPipeline>();
     }
 }
