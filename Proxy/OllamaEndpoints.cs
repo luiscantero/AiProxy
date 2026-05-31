@@ -1,10 +1,10 @@
-using System.Net.Http.Headers;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using AiProxy.Auth;
 using AiProxy.Auth.Copilot;
+using AiProxy.Pipeline;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
 
 namespace AiProxy.Proxy;
 
@@ -151,8 +151,7 @@ public static class OllamaEndpoints
     public static async Task Chat(
         HttpContext context,
         IEnumerable<IAuthProvider> providers,
-        IHttpClientFactory httpClientFactory,
-        IOptions<AiProxyOptions> options,
+        ChatPipeline pipeline,
         ILoggerFactory loggerFactory)
     {
         var logger = loggerFactory.CreateLogger("AiProxy.Ollama.Chat");
@@ -201,58 +200,58 @@ public static class OllamaEndpoints
         // Default for Ollama is stream=true.
         var isStream = req.Stream ?? true;
 
-        // Build OpenAI-shaped upstream request.
-        var openAiRequest = new Dictionary<string, object?>
+        // Translate the Ollama request into the internal (OpenAI-shaped) pipeline request.
+        var messages = new JsonArray();
+        foreach (var m in req.Messages ?? new List<OllamaMessage>())
+        {
+            messages.Add(ConvertMessage(m));
+        }
+
+        var upstreamRequest = new JsonObject
         {
             ["model"] = req.Model,
-            ["messages"] = (req.Messages ?? new List<OllamaMessage>()).Select(ConvertMessage).ToList(),
+            ["messages"] = messages,
             ["stream"] = isStream
         };
         if (req.Options is { } opts)
         {
-            if (opts.Temperature is { } t) openAiRequest["temperature"] = t;
-            if (opts.TopP is { } tp) openAiRequest["top_p"] = tp;
-            if (opts.NumPredict is { } np) openAiRequest["max_tokens"] = np;
-            if (opts.Stop is { Length: > 0 } stop) openAiRequest["stop"] = stop;
+            if (opts.Temperature is { } t) upstreamRequest["temperature"] = t;
+            if (opts.TopP is { } tp) upstreamRequest["top_p"] = tp;
+            if (opts.NumPredict is { } np) upstreamRequest["max_tokens"] = np;
+            if (opts.Stop is { Length: > 0 } stop)
+            {
+                var stopArray = new JsonArray();
+                foreach (var s in stop) stopArray.Add(s);
+                upstreamRequest["stop"] = stopArray;
+            }
         }
         if (req.Tools is { Count: > 0 } tools)
         {
-            openAiRequest["tools"] = tools;
+            var toolArray = new JsonArray();
+            foreach (var tool in tools) toolArray.Add(JsonNode.Parse(tool.GetRawText()));
+            upstreamRequest["tools"] = toolArray;
         }
 
-        var bodyBytes = JsonSerializer.SerializeToUtf8Bytes(openAiRequest, JsonOptions);
-
-        string upstreamBearer;
-        try
+        var pipelineContext = new ChatPipelineContext
         {
-            upstreamBearer = await copilot.GetAccessTokenAsync(cancellationToken).ConfigureAwait(false);
-        }
-        catch (Exception ex)
-        {
-            logger.LogWarning(ex, "Failed to acquire upstream access token.");
-            await WriteJsonErrorAsync(context, 503, ex.Message);
-            return;
-        }
-
-        var upstreamBaseUrl = await copilot.GetUpstreamApiBaseUrlAsync(cancellationToken).ConfigureAwait(false)
-                              ?? options.Value.Copilot.UpstreamBaseUrl;
-        var upstreamUrl = upstreamBaseUrl.TrimEnd('/') + "/chat/completions";
-
-        var http = httpClientFactory.CreateClient("upstream");
-        using var upstreamRequest = new HttpRequestMessage(HttpMethod.Post, upstreamUrl)
-        {
-            Content = new ByteArrayContent(bodyBytes)
+            Http = context,
+            Surface = ClientSurface.Ollama,
+            Model = req.Model,
+            IsStreaming = isStream,
+            UpstreamRequest = upstreamRequest,
+            Provider = copilot,
+            Logger = logger
         };
-        upstreamRequest.Content.Headers.ContentType = new MediaTypeHeaderValue("application/json");
-        upstreamRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", upstreamBearer);
-        upstreamRequest.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue(isStream ? "text/event-stream" : "application/json"));
-        CopilotHeaders.Apply(upstreamRequest);
-        upstreamRequest.Headers.TryAddWithoutValidation("OpenAI-Intent", "conversation-panel");
 
-        HttpResponseMessage upstreamResponse;
         try
         {
-            upstreamResponse = await http.SendAsync(upstreamRequest, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
+            await pipeline.InvokeAsync(pipelineContext).ConfigureAwait(false);
+        }
+        catch (UpstreamException ex)
+        {
+            logger.LogWarning("Upstream returned {Status}: {Body}", ex.StatusCode, ex.Body);
+            await WriteJsonErrorAsync(context, ex.StatusCode, ex.Body);
+            return;
         }
         catch (HttpRequestException ex)
         {
@@ -261,36 +260,18 @@ public static class OllamaEndpoints
             return;
         }
 
-        try
+        if (isStream)
         {
-            if (!upstreamResponse.IsSuccessStatusCode)
-            {
-                var errorBody = await upstreamResponse.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
-                logger.LogWarning("Upstream returned {Status}: {Body}", (int)upstreamResponse.StatusCode, errorBody);
-                await WriteJsonErrorAsync(context, (int)upstreamResponse.StatusCode, errorBody);
-                return;
-            }
-
-            await using var upstreamStream = await upstreamResponse.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
-
-            if (isStream)
-            {
-                context.Response.StatusCode = 200;
-                context.Response.ContentType = "application/x-ndjson";
-                await TranslateSseToNdjsonAsync(req.Model, upstreamStream, context.Response.Body, cancellationToken).ConfigureAwait(false);
-            }
-            else
-            {
-                context.Response.StatusCode = 200;
-                context.Response.ContentType = "application/json";
-                using var doc = await JsonDocument.ParseAsync(upstreamStream, cancellationToken: cancellationToken).ConfigureAwait(false);
-                var ollama = ConvertNonStreamingResponse(req.Model, doc.RootElement);
-                await JsonSerializer.SerializeAsync(context.Response.Body, ollama, JsonOptions, cancellationToken).ConfigureAwait(false);
-            }
+            context.Response.StatusCode = 200;
+            context.Response.ContentType = "application/x-ndjson";
+            await WriteNdjsonStreamAsync(req.Model, pipelineContext.ResponseChunks, context.Response.Body, cancellationToken).ConfigureAwait(false);
         }
-        finally
+        else
         {
-            upstreamResponse.Dispose();
+            context.Response.StatusCode = 200;
+            context.Response.ContentType = "application/json";
+            var ollama = await AggregateNonStreamingAsync(req.Model, pipelineContext.ResponseChunks, cancellationToken).ConfigureAwait(false);
+            await JsonSerializer.SerializeAsync(context.Response.Body, ollama, JsonOptions, cancellationToken).ConfigureAwait(false);
         }
     }
 
@@ -298,90 +279,54 @@ public static class OllamaEndpoints
     // Translation helpers
     // ----------------------------------------------------------------------
 
-    private static object ConvertMessage(OllamaMessage m)
+    private static JsonObject ConvertMessage(OllamaMessage m)
     {
         // Pass content through; ignore images for now (Copilot won't accept them anyway).
-        var obj = new Dictionary<string, object?>
+        var obj = new JsonObject
         {
             ["role"] = m.Role,
             ["content"] = m.Content ?? ""
         };
-        if (m.ToolCalls is { Count: > 0 } tc) obj["tool_calls"] = tc;
+        if (m.ToolCalls is { Count: > 0 } tc)
+        {
+            var toolArray = new JsonArray();
+            foreach (var call in tc) toolArray.Add(JsonNode.Parse(call.GetRawText()));
+            obj["tool_calls"] = toolArray;
+        }
         if (!string.IsNullOrEmpty(m.Name)) obj["name"] = m.Name;
         return obj;
     }
 
-    private static async Task TranslateSseToNdjsonAsync(string model, Stream sseStream, Stream outputStream, CancellationToken cancellationToken)
+    private static async Task WriteNdjsonStreamAsync(
+        string model,
+        IAsyncEnumerable<ChatResponseChunk> chunks,
+        Stream outputStream,
+        CancellationToken cancellationToken)
     {
-        using var reader = new StreamReader(sseStream);
-        string? line;
         var lastFinishReason = "stop";
         var promptTokens = 0;
         var completionTokens = 0;
 
-        while ((line = await reader.ReadLineAsync(cancellationToken).ConfigureAwait(false)) != null)
+        await foreach (var chunk in chunks.WithCancellation(cancellationToken).ConfigureAwait(false))
         {
-            if (line.Length == 0) continue;
-            if (!line.StartsWith("data:", StringComparison.Ordinal)) continue;
+            if (chunk.PromptTokens is { } pt) promptTokens = pt;
+            if (chunk.CompletionTokens is { } ct) completionTokens = ct;
+            if (chunk.FinishReason is { } fr) lastFinishReason = fr;
 
-            var payload = line.AsSpan("data:".Length).Trim().ToString();
-            if (payload == "[DONE]") break;
-            if (payload.Length == 0) continue;
-
-            JsonDocument doc;
-            try { doc = JsonDocument.Parse(payload); }
-            catch { continue; }
-
-            using (doc)
+            // Skip frames that have nothing to deliver.
+            if (chunk.ContentDelta is null && chunk.ToolCalls is null)
             {
-                var root = doc.RootElement;
-
-                if (root.TryGetProperty("usage", out var usageEl) && usageEl.ValueKind == JsonValueKind.Object)
-                {
-                    if (usageEl.TryGetProperty("prompt_tokens", out var pt) && pt.TryGetInt32(out var pti)) promptTokens = pti;
-                    if (usageEl.TryGetProperty("completion_tokens", out var ct) && ct.TryGetInt32(out var cti)) completionTokens = cti;
-                }
-
-                if (!root.TryGetProperty("choices", out var choices) || choices.ValueKind != JsonValueKind.Array || choices.GetArrayLength() == 0)
-                {
-                    continue;
-                }
-                var choice = choices[0];
-
-                string? deltaContent = null;
-                List<JsonElement>? deltaToolCalls = null;
-                if (choice.TryGetProperty("delta", out var deltaEl) && deltaEl.ValueKind == JsonValueKind.Object)
-                {
-                    if (deltaEl.TryGetProperty("content", out var cEl) && cEl.ValueKind == JsonValueKind.String)
-                    {
-                        deltaContent = cEl.GetString();
-                    }
-                    if (deltaEl.TryGetProperty("tool_calls", out var tcEl) && tcEl.ValueKind == JsonValueKind.Array)
-                    {
-                        deltaToolCalls = tcEl.EnumerateArray().Select(e => e.Clone()).ToList();
-                    }
-                }
-
-                if (choice.TryGetProperty("finish_reason", out var frEl) && frEl.ValueKind == JsonValueKind.String)
-                {
-                    lastFinishReason = frEl.GetString() ?? "stop";
-                }
-
-                // Skip frames that have nothing to deliver.
-                if (deltaContent is null && deltaToolCalls is null)
-                {
-                    continue;
-                }
-
-                var chunk = new Dictionary<string, object?>
-                {
-                    ["model"] = model,
-                    ["created_at"] = DateTimeOffset.UtcNow.ToString("yyyy-MM-ddTHH:mm:ss.fffffffK"),
-                    ["message"] = BuildMessage(deltaContent ?? "", deltaToolCalls),
-                    ["done"] = false
-                };
-                await WriteNdjsonAsync(outputStream, chunk, cancellationToken).ConfigureAwait(false);
+                continue;
             }
+
+            var frame = new Dictionary<string, object?>
+            {
+                ["model"] = model,
+                ["created_at"] = DateTimeOffset.UtcNow.ToString("yyyy-MM-ddTHH:mm:ss.fffffffK"),
+                ["message"] = BuildMessage(chunk.ContentDelta ?? "", chunk.ToolCalls),
+                ["done"] = false
+            };
+            await WriteNdjsonAsync(outputStream, frame, cancellationToken).ConfigureAwait(false);
         }
 
         // Final "done" frame.
@@ -402,7 +347,7 @@ public static class OllamaEndpoints
         await WriteNdjsonAsync(outputStream, done, cancellationToken).ConfigureAwait(false);
     }
 
-    private static object BuildMessage(string content, List<JsonElement>? toolCalls)
+    private static object BuildMessage(string content, IReadOnlyList<JsonElement>? toolCalls)
     {
         var dict = new Dictionary<string, object?>
         {
@@ -424,36 +369,29 @@ public static class OllamaEndpoints
         await stream.FlushAsync(cancellationToken).ConfigureAwait(false);
     }
 
-    private static object ConvertNonStreamingResponse(string model, JsonElement openAi)
+    private static async Task<object> AggregateNonStreamingAsync(
+        string model,
+        IAsyncEnumerable<ChatResponseChunk> chunks,
+        CancellationToken cancellationToken)
     {
-        string content = "";
+        var content = new System.Text.StringBuilder();
         var finishReason = "stop";
         var promptTokens = 0;
         var completionTokens = 0;
 
-        if (openAi.TryGetProperty("choices", out var choices) && choices.ValueKind == JsonValueKind.Array && choices.GetArrayLength() > 0)
+        await foreach (var chunk in chunks.WithCancellation(cancellationToken).ConfigureAwait(false))
         {
-            var first = choices[0];
-            if (first.TryGetProperty("message", out var msg) && msg.TryGetProperty("content", out var c) && c.ValueKind == JsonValueKind.String)
-            {
-                content = c.GetString() ?? "";
-            }
-            if (first.TryGetProperty("finish_reason", out var fr) && fr.ValueKind == JsonValueKind.String)
-            {
-                finishReason = fr.GetString() ?? "stop";
-            }
-        }
-        if (openAi.TryGetProperty("usage", out var usage) && usage.ValueKind == JsonValueKind.Object)
-        {
-            if (usage.TryGetProperty("prompt_tokens", out var pt) && pt.TryGetInt32(out var pti)) promptTokens = pti;
-            if (usage.TryGetProperty("completion_tokens", out var ct) && ct.TryGetInt32(out var cti)) completionTokens = cti;
+            if (chunk.ContentDelta is { } c) content.Append(c);
+            if (chunk.FinishReason is { } fr) finishReason = fr;
+            if (chunk.PromptTokens is { } pt) promptTokens = pt;
+            if (chunk.CompletionTokens is { } ct) completionTokens = ct;
         }
 
         return new
         {
             model,
             created_at = DateTimeOffset.UtcNow.ToString("yyyy-MM-ddTHH:mm:ss.fffffffK"),
-            message = new { role = "assistant", content },
+            message = new { role = "assistant", content = content.ToString() },
             done_reason = finishReason,
             done = true,
             total_duration = 0,

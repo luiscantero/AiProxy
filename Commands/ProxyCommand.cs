@@ -1,5 +1,7 @@
 using AiProxy.Auth;
 using AiProxy.Auth.Copilot;
+using AiProxy.Pipeline;
+using AiProxy.Pipeline.Middlewares;
 using AiProxy.Proxy;
 using AiProxy.Storage;
 using Microsoft.AspNetCore.Builder;
@@ -118,5 +120,13 @@ internal static class ServiceRegistration
 
         services.AddSingleton<CopilotAuthProvider>();
         services.AddSingleton<IAuthProvider>(sp => sp.GetRequiredService<CopilotAuthProvider>());
+
+        // Chat pipeline: the terminal upstream invoker plus an ordered list of middlewares.
+        // Add your own IChatMiddleware registrations here; they run in registration order
+        // (outermost first), so a middleware can transform the request on the way to Copilot
+        // and the response on the way back to the client (e.g. compress / decompress).
+        services.AddSingleton<UpstreamChatInvoker>();
+        services.AddSingleton<IChatMiddleware, LoggingChatMiddleware>();
+        services.AddSingleton<ChatPipeline>();
     }
 }

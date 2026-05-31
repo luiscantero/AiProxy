@@ -1,13 +1,22 @@
-using System.Net.Http.Headers;
+using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using AiProxy.Auth;
 using AiProxy.Auth.Copilot;
+using AiProxy.Pipeline;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
 
 namespace AiProxy.Proxy;
 
+/// <summary>
+/// OpenAI-compatible <c>/v1/chat/completions</c> surface.
+///
+/// This adapter only translates between the OpenAI wire format and the internal pipeline:
+/// it parses the request, runs the <see cref="ChatPipeline"/> (logging, prompt transforms,
+/// the upstream call, response transforms, ...), and serializes the normalized response back
+/// into OpenAI SSE / JSON. All transformation logic lives in pipeline middlewares.
+/// </summary>
 public static class ChatCompletionsEndpoint
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
@@ -15,8 +24,7 @@ public static class ChatCompletionsEndpoint
     public static async Task HandleAsync(
         HttpContext context,
         IEnumerable<IAuthProvider> providers,
-        IHttpClientFactory httpClientFactory,
-        IOptions<AiProxyOptions> options,
+        ChatPipeline pipeline,
         ILoggerFactory loggerFactory)
     {
         var logger = loggerFactory.CreateLogger("AiProxy.Proxy.Chat");
@@ -29,30 +37,25 @@ public static class ChatCompletionsEndpoint
             return;
         }
 
-        // Read & parse body so we can validate the model and forward verbatim.
+        // Parse the body into a mutable JSON object so middlewares can rewrite it. Because the
+        // OpenAI surface is already OpenAI-shaped, the parsed body *is* the upstream request.
         using var ms = new MemoryStream();
-        await context.Request.Body.CopyToAsync(ms, cancellationToken);
-        var bodyBytes = ms.ToArray();
+        await context.Request.Body.CopyToAsync(ms, cancellationToken).ConfigureAwait(false);
 
-        string? requestedModel = null;
-        bool isStream = false;
+        JsonObject upstreamRequest;
         try
         {
-            using var doc = JsonDocument.Parse(bodyBytes);
-            if (doc.RootElement.TryGetProperty("model", out var modelEl) && modelEl.ValueKind == JsonValueKind.String)
-            {
-                requestedModel = modelEl.GetString();
-            }
-            if (doc.RootElement.TryGetProperty("stream", out var streamEl) && streamEl.ValueKind is JsonValueKind.True or JsonValueKind.False)
-            {
-                isStream = streamEl.GetBoolean();
-            }
+            upstreamRequest = JsonNode.Parse(ms.ToArray()) as JsonObject
+                              ?? throw new JsonException("Request body must be a JSON object.");
         }
         catch (JsonException ex)
         {
             await WriteErrorAsync(context, StatusCodes.Status400BadRequest, $"Invalid JSON: {ex.Message}", "bad_request");
             return;
         }
+
+        var requestedModel = upstreamRequest["model"]?.GetValue<string>();
+        var isStream = upstreamRequest["stream"]?.GetValue<bool>() ?? false;
 
         if (string.IsNullOrEmpty(requestedModel))
         {
@@ -74,37 +77,26 @@ public static class ChatCompletionsEndpoint
             return;
         }
 
-        string upstreamBearer;
-        try
+        var pipelineContext = new ChatPipelineContext
         {
-            upstreamBearer = await copilot.GetAccessTokenAsync(cancellationToken).ConfigureAwait(false);
-        }
-        catch (Exception ex)
-        {
-            logger.LogWarning(ex, "Failed to acquire upstream access token.");
-            await WriteErrorAsync(context, StatusCodes.Status503ServiceUnavailable, ex.Message, "service_unavailable");
-            return;
-        }
-
-        var upstreamBaseUrl = await copilot.GetUpstreamApiBaseUrlAsync(cancellationToken).ConfigureAwait(false)
-                              ?? options.Value.Copilot.UpstreamBaseUrl;
-        var upstreamUrl = upstreamBaseUrl.TrimEnd('/') + "/chat/completions";
-        var http = httpClientFactory.CreateClient("upstream");
-
-        using var upstreamRequest = new HttpRequestMessage(HttpMethod.Post, upstreamUrl)
-        {
-            Content = new ByteArrayContent(bodyBytes)
+            Http = context,
+            Surface = ClientSurface.OpenAi,
+            Model = requestedModel,
+            IsStreaming = isStream,
+            UpstreamRequest = upstreamRequest,
+            Provider = copilot,
+            Logger = logger
         };
-        upstreamRequest.Content.Headers.ContentType = new MediaTypeHeaderValue("application/json");
-        upstreamRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", upstreamBearer);
-        upstreamRequest.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue(isStream ? "text/event-stream" : "application/json"));
-        CopilotHeaders.Apply(upstreamRequest);
-        upstreamRequest.Headers.TryAddWithoutValidation("OpenAI-Intent", "conversation-panel");
 
-        HttpResponseMessage upstreamResponse;
         try
         {
-            upstreamResponse = await http.SendAsync(upstreamRequest, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
+            await pipeline.InvokeAsync(pipelineContext).ConfigureAwait(false);
+        }
+        catch (UpstreamException ex)
+        {
+            logger.LogWarning("Upstream returned {Status}: {Body}", ex.StatusCode, ex.Body);
+            await WriteErrorAsync(context, ex.StatusCode, ex.Body, "upstream_error");
+            return;
         }
         catch (HttpRequestException ex)
         {
@@ -113,56 +105,160 @@ public static class ChatCompletionsEndpoint
             return;
         }
 
-        try
+        if (isStream)
         {
-            context.Response.StatusCode = (int)upstreamResponse.StatusCode;
-
-            // Copy content headers (Content-Type especially), filter hop-by-hop.
-            foreach (var header in upstreamResponse.Headers)
-            {
-                if (IsHopByHop(header.Key)) continue;
-                context.Response.Headers[header.Key] = header.Value.ToArray();
-            }
-            foreach (var header in upstreamResponse.Content.Headers)
-            {
-                if (IsHopByHop(header.Key)) continue;
-                if (string.Equals(header.Key, "Content-Length", StringComparison.OrdinalIgnoreCase)) continue;
-                context.Response.Headers[header.Key] = header.Value.ToArray();
-            }
-
-            await using var upstreamStream = await upstreamResponse.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
-
-            if (isStream)
-            {
-                // Per-chunk flush for SSE.
-                var buffer = new byte[8192];
-                int read;
-                while ((read = await upstreamStream.ReadAsync(buffer.AsMemory(0, buffer.Length), cancellationToken).ConfigureAwait(false)) > 0)
-                {
-                    await context.Response.Body.WriteAsync(buffer.AsMemory(0, read), cancellationToken).ConfigureAwait(false);
-                    await context.Response.Body.FlushAsync(cancellationToken).ConfigureAwait(false);
-                }
-            }
-            else
-            {
-                await upstreamStream.CopyToAsync(context.Response.Body, cancellationToken).ConfigureAwait(false);
-            }
+            await WriteStreamingAsync(context, requestedModel, pipelineContext.ResponseChunks, cancellationToken).ConfigureAwait(false);
         }
-        finally
+        else
         {
-            upstreamResponse.Dispose();
+            await WriteNonStreamingAsync(context, requestedModel, pipelineContext.ResponseChunks, cancellationToken).ConfigureAwait(false);
         }
     }
 
-    private static bool IsHopByHop(string headerName) =>
-        headerName.Equals("Connection", StringComparison.OrdinalIgnoreCase)
-        || headerName.Equals("Keep-Alive", StringComparison.OrdinalIgnoreCase)
-        || headerName.Equals("Proxy-Authenticate", StringComparison.OrdinalIgnoreCase)
-        || headerName.Equals("Proxy-Authorization", StringComparison.OrdinalIgnoreCase)
-        || headerName.Equals("TE", StringComparison.OrdinalIgnoreCase)
-        || headerName.Equals("Trailer", StringComparison.OrdinalIgnoreCase)
-        || headerName.Equals("Transfer-Encoding", StringComparison.OrdinalIgnoreCase)
-        || headerName.Equals("Upgrade", StringComparison.OrdinalIgnoreCase);
+    private static async Task WriteStreamingAsync(
+        HttpContext context,
+        string model,
+        IAsyncEnumerable<ChatResponseChunk> chunks,
+        CancellationToken cancellationToken)
+    {
+        context.Response.StatusCode = StatusCodes.Status200OK;
+        context.Response.ContentType = "text/event-stream";
+
+        var id = "chatcmpl-" + Guid.NewGuid().ToString("N");
+        var created = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+        int? promptTokens = null;
+        int? completionTokens = null;
+
+        await foreach (var chunk in chunks.WithCancellation(cancellationToken).ConfigureAwait(false))
+        {
+            if (chunk.PromptTokens is { } pt) promptTokens = pt;
+            if (chunk.CompletionTokens is { } ct) completionTokens = ct;
+
+            if (chunk.ContentDelta is null && chunk.ToolCalls is null && chunk.FinishReason is null)
+            {
+                continue;
+            }
+
+            var delta = new JsonObject();
+            if (chunk.ContentDelta is { } content) delta["content"] = content;
+            if (chunk.ToolCalls is { } toolCalls) delta["tool_calls"] = ToJsonArray(toolCalls);
+
+            var frame = new JsonObject
+            {
+                ["id"] = id,
+                ["object"] = "chat.completion.chunk",
+                ["created"] = created,
+                ["model"] = model,
+                ["choices"] = new JsonArray
+                {
+                    new JsonObject
+                    {
+                        ["index"] = 0,
+                        ["delta"] = delta,
+                        ["finish_reason"] = chunk.FinishReason
+                    }
+                }
+            };
+
+            await WriteSseAsync(context.Response.Body, frame, cancellationToken).ConfigureAwait(false);
+        }
+
+        if (promptTokens is not null || completionTokens is not null)
+        {
+            var usageFrame = new JsonObject
+            {
+                ["id"] = id,
+                ["object"] = "chat.completion.chunk",
+                ["created"] = created,
+                ["model"] = model,
+                ["choices"] = new JsonArray(),
+                ["usage"] = new JsonObject
+                {
+                    ["prompt_tokens"] = promptTokens ?? 0,
+                    ["completion_tokens"] = completionTokens ?? 0,
+                    ["total_tokens"] = (promptTokens ?? 0) + (completionTokens ?? 0)
+                }
+            };
+            await WriteSseAsync(context.Response.Body, usageFrame, cancellationToken).ConfigureAwait(false);
+        }
+
+        await context.Response.Body.WriteAsync("data: [DONE]\n\n"u8.ToArray(), cancellationToken).ConfigureAwait(false);
+        await context.Response.Body.FlushAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    private static async Task WriteNonStreamingAsync(
+        HttpContext context,
+        string model,
+        IAsyncEnumerable<ChatResponseChunk> chunks,
+        CancellationToken cancellationToken)
+    {
+        var content = new StringBuilder();
+        var toolCalls = new List<JsonElement>();
+        var finishReason = "stop";
+        int? promptTokens = null;
+        int? completionTokens = null;
+
+        await foreach (var chunk in chunks.WithCancellation(cancellationToken).ConfigureAwait(false))
+        {
+            if (chunk.ContentDelta is { } c) content.Append(c);
+            if (chunk.ToolCalls is { } tc) toolCalls.AddRange(tc);
+            if (chunk.FinishReason is { } fr) finishReason = fr;
+            if (chunk.PromptTokens is { } pt) promptTokens = pt;
+            if (chunk.CompletionTokens is { } ct) completionTokens = ct;
+        }
+
+        var message = new JsonObject
+        {
+            ["role"] = "assistant",
+            ["content"] = content.ToString()
+        };
+        if (toolCalls.Count > 0) message["tool_calls"] = ToJsonArray(toolCalls);
+
+        var response = new JsonObject
+        {
+            ["id"] = "chatcmpl-" + Guid.NewGuid().ToString("N"),
+            ["object"] = "chat.completion",
+            ["created"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
+            ["model"] = model,
+            ["choices"] = new JsonArray
+            {
+                new JsonObject
+                {
+                    ["index"] = 0,
+                    ["message"] = message,
+                    ["finish_reason"] = finishReason
+                }
+            },
+            ["usage"] = new JsonObject
+            {
+                ["prompt_tokens"] = promptTokens ?? 0,
+                ["completion_tokens"] = completionTokens ?? 0,
+                ["total_tokens"] = (promptTokens ?? 0) + (completionTokens ?? 0)
+            }
+        };
+
+        context.Response.StatusCode = StatusCodes.Status200OK;
+        context.Response.ContentType = "application/json";
+        await context.Response.WriteAsync(response.ToJsonString(JsonOptions), cancellationToken).ConfigureAwait(false);
+    }
+
+    private static JsonArray ToJsonArray(IReadOnlyList<JsonElement> elements)
+    {
+        var array = new JsonArray();
+        foreach (var element in elements)
+        {
+            array.Add(JsonNode.Parse(element.GetRawText()));
+        }
+        return array;
+    }
+
+    private static async Task WriteSseAsync(Stream stream, JsonObject frame, CancellationToken cancellationToken)
+    {
+        var json = frame.ToJsonString(JsonOptions);
+        var bytes = Encoding.UTF8.GetBytes($"data: {json}\n\n");
+        await stream.WriteAsync(bytes, cancellationToken).ConfigureAwait(false);
+        await stream.FlushAsync(cancellationToken).ConfigureAwait(false);
+    }
 
     private static async Task WriteErrorAsync(HttpContext context, int statusCode, string message, string type)
     {
