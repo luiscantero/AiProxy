@@ -232,3 +232,7 @@ Other Headroom-style stages that fit this architecture:
   previous turn instead of resending the whole history.
 - **RelevanceSquasher** — statistically drop low-signal middle context.
 
+## License
+
+Released under the MIT License.
+
