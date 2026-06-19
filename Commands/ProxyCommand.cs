@@ -26,7 +26,7 @@ public static class ProxyCommand
 
         ServiceRegistration.Configure(builder.Services, builder.Configuration);
 
-        var listenUrl = builder.Configuration["ListenUrl"] ?? "http://127.0.0.1:11435";
+        var listenUrl = builder.Configuration["ListenUrl"] ?? "http://127.0.0.1:11434";
         builder.WebHost.UseUrls(listenUrl);
 
         var app = builder.Build();

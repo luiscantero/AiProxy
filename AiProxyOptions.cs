@@ -2,7 +2,7 @@ namespace AiProxy;
 
 public sealed class AiProxyOptions
 {
-    public string ListenUrl { get; set; } = "http://127.0.0.1:11435";
+    public string ListenUrl { get; set; } = "http://127.0.0.1:11434";
     public string ProxyApiKey { get; set; } = "";
     public CopilotOptions Copilot { get; set; } = new();
     public ApiSurfaceOptions Apis { get; set; } = new();
