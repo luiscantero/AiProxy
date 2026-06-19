@@ -155,6 +155,7 @@ internal static class ServiceRegistration
         //   JsonCrusher   — losslessly minifies embedded JSON (tool outputs, API/DB payloads).
         //   LogCompressor — squashes redundant log blocks (dupes + low-severity runs).
         //   Caveman       — LLM-driven natural-language compression (opt-in via Caveman.Enabled).
+        //   ModelFallback — retries an unavailable model against prioritized alternatives (opt-in).
         services.AddSingleton<IChatMiddleware, LoggingChatMiddleware>();
         services.AddSingleton<IChatMiddleware, CacheAlignerMiddleware>();
         services.AddSingleton<IChatMiddleware, JsonCrusherMiddleware>();
@@ -162,6 +163,11 @@ internal static class ServiceRegistration
 
         services.AddSingleton<ICavemanTransformer, CavemanTransformer>();
         services.AddSingleton<IChatMiddleware, CavemanMiddleware>();
+
+        // Innermost (closest to the upstream call): if the requested model is unavailable, retry
+        // against a prioritized list of alternatives. Placed last so a fallback only re-sends the
+        // already-transformed request — the outer prompt transforms run once. Opt-in via Fallback.Enabled.
+        services.AddSingleton<IChatMiddleware, ModelFallbackMiddleware>();
 
         services.AddSingleton<ChatPipeline>();
     }

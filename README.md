@@ -171,6 +171,7 @@ unchanged, so a middleware can never break a request.
 | [JsonCrusherMiddleware](Pipeline/Middlewares/JsonCrusherMiddleware.cs) | Losslessly **minifies embedded JSON** (tool outputs, API responses, DB rows) found inside message content. It locates balanced JSON spans, re-serializes them compactly, and only replaces a span when the result is strictly shorter. No keys, nulls, or values are dropped. |
 | [LogCompressorMiddleware](Pipeline/Middlewares/LogCompressorMiddleware.cs) | **Squashes log blocks.** When content looks like logs, it collapses consecutive duplicate lines (ignoring volatile timestamps) and thins long runs of low-severity `TRACE`/`DEBUG`/`INFO` lines, while always preserving `WARN`/`ERROR`/`FATAL`/`CRITICAL` lines and stack traces. |
 | [CavemanMiddleware](Pipeline/Middlewares/CavemanMiddleware.cs) | **LLM-driven natural-language compression** (opt-in). Delegates [caveman compression](https://github.com/wilpel/caveman-compression) to a configured model (typically a local Ollama) to strip grammar/filler from prompt content while preserving facts, then optionally expands caveman replies back to fluent prose. See [Caveman compression](#caveman-compression-middleware) below. |
+| [ModelFallbackMiddleware](Pipeline/Middlewares/ModelFallbackMiddleware.cs) | **Model fallback / failover** (opt-in). When a model is unavailable (provider outage, rate limit, transient `5xx`), it transparently retries the request against a prioritized list of alternative models — which may live on different providers. See [Model fallback](#model-fallback-middleware) below. |
 
 These run after `LoggingChatMiddleware` (which stays outermost so it reports the
 request as the client sent it). Because each is fail-open and only engages when
@@ -218,7 +219,48 @@ registered Copilot or `OpenAiProviders` entry — e.g. a local Ollama added ther
 }
 ```
 
+#### Model fallback middleware
 
+When a provider has an outage (such as the global Anthropic model outage this is
+designed to ride out), rate-limits you, or returns a transient `5xx`, the
+[ModelFallbackMiddleware](Pipeline/Middlewares/ModelFallbackMiddleware.cs) keeps
+the request alive by automatically retrying it against a **prioritized list of
+alternative models** — transparently to the client.
+
+You configure one or more *chains*. Each chain is simply an array of models in
+priority order: the **first** entry is the model a client requests, and the rest
+are the alternatives to try, in order, when an attempt fails. A fallback model
+can live on a different provider; it is resolved (and authenticated) exactly like
+a directly-requested model, so a chain can fail over from one vendor to another.
+
+- The upstream call **fails fast** — the terminal invoker validates the response
+  status before exposing any chunks — so a fallback happens *before* a single
+  byte has streamed to the client. The retry is invisible to the caller.
+- Only **retryable** statuses trigger a fallback (`RetryStatusCodes`, default
+  `408, 409, 429, 500, 502, 503, 504, 529`) plus transport-level failures.
+  Genuine client errors (e.g. a `400`) are returned unchanged, never masked.
+- If a configured fallback model isn't exposed by any connected provider it is
+  **skipped**; if every candidate fails, the **last** upstream error is surfaced
+  so the client still sees a real failure rather than an empty success.
+
+It runs **innermost** (closest to the upstream call), so the outer prompt
+transforms run only once; each fallback attempt just re-sends the
+already-transformed request with a different model id. Opt-in via
+`Fallback.Enabled`:
+
+```jsonc
+"Fallback": {
+  "Enabled": true,
+  // Upstream statuses that trigger a fallback (transport failures always do).
+  "RetryStatusCodes": [ 408, 409, 429, 500, 502, 503, 504, 529 ],
+  "Chains": [
+    {
+      // Clients request "claude-sonnet-4.6"; on failure try the next, then the next.
+      "Models": [ "claude-sonnet-4.6", "gpt-5.5", "gemini-3.1-pro" ]
+    }
+  ]
+}
+```
 
 #### Ideas for future middlewares
 

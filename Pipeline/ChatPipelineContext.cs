@@ -22,8 +22,12 @@ public sealed class ChatPipelineContext
     /// <summary>Which wire format the downstream client used.</summary>
     public required ClientSurface Surface { get; init; }
 
-    /// <summary>The model id requested by the client (already validated against the allow-list).</summary>
-    public required string Model { get; init; }
+    /// <summary>
+    /// The model id the request currently targets. Initialized to the client-requested model
+    /// (already validated against the allow-list); the fallback middleware may swap it to an
+    /// alternative model when the primary is unavailable.
+    /// </summary>
+    public required string Model { get; set; }
 
     /// <summary>Whether the client asked for a streaming response.</summary>
     public required bool IsStreaming { get; init; }
@@ -34,8 +38,11 @@ public sealed class ChatPipelineContext
     /// </summary>
     public required JsonObject UpstreamRequest { get; init; }
 
-    /// <summary>The authenticated upstream provider (GitHub Copilot).</summary>
-    public required IAuthProvider Provider { get; init; }
+    /// <summary>
+    /// The authenticated upstream provider that owns <see cref="Model"/>. The fallback middleware
+    /// may swap it when retrying against an alternative model hosted by a different provider.
+    /// </summary>
+    public required IAuthProvider Provider { get; set; }
 
     /// <summary>A logger scoped to the pipeline.</summary>
     public required ILogger Logger { get; init; }

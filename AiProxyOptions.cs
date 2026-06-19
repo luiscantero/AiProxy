@@ -15,6 +15,12 @@ public sealed class AiProxyOptions
     public CavemanOptions Caveman { get; set; } = new();
 
     /// <summary>
+    /// Model fallback middleware: when an upstream model is unavailable (outage, rate limit,
+    /// 5xx), automatically retry the request against a prioritized list of alternative models.
+    /// </summary>
+    public FallbackOptions Fallback { get; set; } = new();
+
+    /// <summary>
     /// OpenAI-compatible upstreams to expose (OpenAI, OpenRouter, Groq, DeepSeek, Gemini's
     /// OpenAI endpoint, local runtimes, ...). Each entry becomes its own auth provider that
     /// can be connected with <c>AiProxy connect &lt;name&gt;</c>. Adding a new provider is
@@ -89,6 +95,42 @@ public sealed class CavemanOptions
     /// </summary>
     public int MinCharacters { get; set; } = 400;
 }
+
+/// <summary>
+/// Configuration for the model fallback middleware. When a request to a primary model fails with
+/// a retryable upstream error (outage, rate limit, 5xx), the middleware re-issues the same request
+/// against the next model in a prioritized list — transparently to the client. Disabled by default.
+/// </summary>
+public sealed class FallbackOptions
+{
+    /// <summary>Master switch. When false the middleware passes every request through untouched.</summary>
+    public bool Enabled { get; set; }
+
+    /// <summary>
+    /// Ordered fallback chains. Each chain lists models in priority order: the first entry is the
+    /// model a client requests, and the remaining entries are the alternatives to try, in order,
+    /// when an attempt fails. A fallback model may live on a different provider; it is resolved the
+    /// same way a directly-requested model is.
+    /// </summary>
+    public List<FallbackChain> Chains { get; set; } = new();
+
+    /// <summary>
+    /// Upstream HTTP status codes that trigger a fallback. Any other status (e.g. 400 for a
+    /// malformed request) is returned to the client unchanged. Defaults to 429 and 5xx.
+    /// </summary>
+    public List<int> RetryStatusCodes { get; set; } = new() { 408, 409, 429, 500, 502, 503, 504, 529 };
+}
+
+/// <summary>
+/// A single prioritized list of models. <see cref="Models"/>[0] is the model clients request;
+/// the rest are fallbacks tried in order when an attempt fails.
+/// </summary>
+public sealed class FallbackChain
+{
+    /// <summary>Models in priority order. The first is the requested model; the rest are fallbacks.</summary>
+    public List<string> Models { get; set; } = new();
+}
+
 
 /// <summary>
 /// Toggles for the wire-format surfaces the proxy exposes.
