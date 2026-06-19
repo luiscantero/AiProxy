@@ -5,6 +5,41 @@ OpenAI-compatible provider (OpenAI, OpenRouter, Groq, DeepSeek, ...) — through
 OpenAI- and Ollama-shaped HTTP API, so you can point tools like VS Code,
 editors, or scripts at `http://localhost:11434` and bring your own AI models.
 
+## Features
+
+- **Use Copilot anywhere** — Surface your GitHub Copilot subscription behind a
+  standard OpenAI/Ollama API. *Point an Ollama-only tool, a CLI script, or a
+  third-party editor at Copilot without it knowing the difference.*
+- **One endpoint, many providers** — Mix Copilot with any OpenAI-compatible
+  upstream (OpenAI, OpenRouter, Groq, DeepSeek, xAI, Gemini, local runtimes).
+  *Add a provider with config only, then switch models without touching the
+  client.*
+- **Unified model catalog** — Every connected provider's models are merged into
+  one `/v1/models` and `/api/tags` list, routed automatically by model id.
+  *Browse all your models in a single dropdown and let the proxy pick the right
+  upstream.*
+- **Encrypted local auth** — GitHub device-flow login and API keys are stored
+  on-disk encrypted with Windows DPAPI. *Authenticate once with `connect`; no
+  secrets in config files or environment variables.*
+- **Token-saving pipeline** — Composable middlewares shrink prompts before they
+  go upstream (cache alignment, JSON minification, log squashing, caveman
+  compression). *Cut token usage on large tool outputs, logs, or verbose
+  prompts automatically.*
+- **Model fallback / failover** — Transparently retry against a prioritized list
+  of alternative models on outages, rate limits, or transient errors. *Ride out
+  a provider outage by failing over from one vendor to another mid-request.*
+- **Extensible by design** — Drop in your own ASP.NET-style middleware to
+  transform requests and responses. *Add custom logging, redaction, or prompt
+  rewriting in a few lines.*
+
+## Requirements
+
+- **.NET 10 SDK** — the project targets `net10.0`.
+- **Windows** — auth state is encrypted at rest with Windows DPAPI (see
+  [Storage/DpapiTokenStore.cs](Storage/DpapiTokenStore.cs)).
+- **A GitHub Copilot subscription** for the `copilot` provider, and/or an API
+  key for any OpenAI-compatible provider you connect.
+
 ## Commands
 
 ```text
@@ -152,7 +187,13 @@ services.AddSingleton<IChatMiddleware, LoggingChatMiddleware>();
 services.AddSingleton<IChatMiddleware, CacheAlignerMiddleware>();
 services.AddSingleton<IChatMiddleware, JsonCrusherMiddleware>();
 services.AddSingleton<IChatMiddleware, LogCompressorMiddleware>();
+services.AddSingleton<IChatMiddleware, CavemanMiddleware>();
 services.AddSingleton<IChatMiddleware, TokenCompressionMiddleware>(); // your middleware
+
+// ModelFallback stays innermost so each retry re-sends the already-transformed
+// request; register your own middleware before it (above) unless it must wrap
+// the upstream call directly.
+services.AddSingleton<IChatMiddleware, ModelFallbackMiddleware>();
 
 services.AddSingleton<ChatPipeline>();
 ```
@@ -165,13 +206,13 @@ The pipeline ships with a set of inbound transforms inspired by
 unexpected error is logged at debug level and the original request is forwarded
 unchanged, so a middleware can never break a request.
 
-| Middleware | What it does |
-| --- | --- |
-| [CacheAlignerMiddleware](Pipeline/Middlewares/CacheAlignerMiddleware.cs) | Stabilizes the cacheable **system-prompt prefix**. Volatile tokens (dates, ISO timestamps, UUIDs, epoch seconds) in the system message cause a provider KV-cache miss on every call; they are rewritten to fixed placeholders (`<DATE>`, `<TIMESTAMP>`, `<UUID>`, `<EPOCH>`) so the prefix stays byte-stable. Only system messages are touched. |
-| [JsonCrusherMiddleware](Pipeline/Middlewares/JsonCrusherMiddleware.cs) | Losslessly **minifies embedded JSON** (tool outputs, API responses, DB rows) found inside message content. It locates balanced JSON spans, re-serializes them compactly, and only replaces a span when the result is strictly shorter. No keys, nulls, or values are dropped. |
-| [LogCompressorMiddleware](Pipeline/Middlewares/LogCompressorMiddleware.cs) | **Squashes log blocks.** When content looks like logs, it collapses consecutive duplicate lines (ignoring volatile timestamps) and thins long runs of low-severity `TRACE`/`DEBUG`/`INFO` lines, while always preserving `WARN`/`ERROR`/`FATAL`/`CRITICAL` lines and stack traces. |
-| [CavemanMiddleware](Pipeline/Middlewares/CavemanMiddleware.cs) | **LLM-driven natural-language compression** (opt-in). Delegates [caveman compression](https://github.com/wilpel/caveman-compression) to a configured model (typically a local Ollama) to strip grammar/filler from prompt content while preserving facts, then optionally expands caveman replies back to fluent prose. See [Caveman compression](#caveman-compression-middleware) below. |
-| [ModelFallbackMiddleware](Pipeline/Middlewares/ModelFallbackMiddleware.cs) | **Model fallback / failover** (opt-in). When a model is unavailable (provider outage, rate limit, transient `5xx`), it transparently retries the request against a prioritized list of alternative models — which may live on different providers. See [Model fallback](#model-fallback-middleware) below. |
+| Middleware                                                                 | What it does                                                                                                                                                                                                                                                                                                                                                                              |
+| -------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [CacheAlignerMiddleware](Pipeline/Middlewares/CacheAlignerMiddleware.cs)   | Stabilizes the cacheable **system-prompt prefix**. Volatile tokens (dates, ISO timestamps, UUIDs, epoch seconds) in the system message cause a provider KV-cache miss on every call; they are rewritten to fixed placeholders (`<DATE>`, `<TIMESTAMP>`, `<UUID>`, `<EPOCH>`) so the prefix stays byte-stable. Only system messages are touched.                                           |
+| [JsonCrusherMiddleware](Pipeline/Middlewares/JsonCrusherMiddleware.cs)     | Losslessly **minifies embedded JSON** (tool outputs, API responses, DB rows) found inside message content. It locates balanced JSON spans, re-serializes them compactly, and only replaces a span when the result is strictly shorter. No keys, nulls, or values are dropped.                                                                                                             |
+| [LogCompressorMiddleware](Pipeline/Middlewares/LogCompressorMiddleware.cs) | **Squashes log blocks.** When content looks like logs, it collapses consecutive duplicate lines (ignoring volatile timestamps) and thins long runs of low-severity `TRACE`/`DEBUG`/`INFO` lines, while always preserving `WARN`/`ERROR`/`FATAL`/`CRITICAL` lines and stack traces.                                                                                                        |
+| [CavemanMiddleware](Pipeline/Middlewares/CavemanMiddleware.cs)             | **LLM-driven natural-language compression** (opt-in). Delegates [caveman compression](https://github.com/wilpel/caveman-compression) to a configured model (typically a local Ollama) to strip grammar/filler from prompt content while preserving facts, then optionally expands caveman replies back to fluent prose. See [Caveman compression](#caveman-compression-middleware) below. |
+| [ModelFallbackMiddleware](Pipeline/Middlewares/ModelFallbackMiddleware.cs) | **Model fallback / failover** (opt-in). When a model is unavailable (provider outage, rate limit, transient `5xx`), it transparently retries the request against a prioritized list of alternative models — which may live on different providers. See [Model fallback](#model-fallback-middleware) below.                                                                                |
 
 These run after `LoggingChatMiddleware` (which stays outermost so it reports the
 request as the client sent it). Because each is fail-open and only engages when
@@ -277,4 +318,3 @@ Other Headroom-style stages that fit this architecture:
 ## License
 
 Released under the MIT License.
-
