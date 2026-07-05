@@ -23,8 +23,8 @@ editors, or scripts at `http://localhost:11434` and bring your own AI models.
   secrets in config files or environment variables.*
 - **Token-saving pipeline** — Composable middlewares shrink prompts before they
   go upstream (cache alignment, JSON minification, log squashing, caveman
-  compression). *Cut token usage on large tool outputs, logs, or verbose
-  prompts automatically.*
+  compression, and optional text-to-image rendering). *Cut token usage on large
+  tool outputs, logs, or verbose prompts automatically.*
 - **Model fallback / failover** — Transparently retry against a prioritized list
   of alternative models on outages, rate limits, or transient errors. *Ride out
   a provider outage by failing over from one vendor to another mid-request.*
@@ -191,6 +191,7 @@ services.AddSingleton<IChatMiddleware, CacheAlignerMiddleware>();
 services.AddSingleton<IChatMiddleware, JsonCrusherMiddleware>();
 services.AddSingleton<IChatMiddleware, LogCompressorMiddleware>();
 services.AddSingleton<IChatMiddleware, CavemanMiddleware>();
+services.AddSingleton<IChatMiddleware, PixelPressMiddleware>();
 services.AddSingleton<IChatMiddleware, TokenCompressionMiddleware>(); // your middleware
 
 // ModelFallback stays innermost so each retry re-sends the already-transformed
@@ -217,6 +218,7 @@ unchanged, so a middleware can never break a request.
 | [CavemanMiddleware](Pipeline/Middlewares/CavemanMiddleware.cs)             | **LLM-driven natural-language compression** (opt-in). Delegates [caveman compression](https://github.com/wilpel/caveman-compression) to a configured model (typically a local Ollama) to strip grammar/filler from prompt content while preserving facts, then optionally expands caveman replies back to fluent prose. See [Caveman compression](#caveman-compression-middleware) below. |
 | [ModelFallbackMiddleware](Pipeline/Middlewares/ModelFallbackMiddleware.cs) | **Model fallback / failover** (opt-in). When a model is unavailable (provider outage, rate limit, transient `5xx`), it transparently retries the request against a prioritized list of alternative models — which may live on different providers. See [Model fallback](#model-fallback-middleware) below.                                                                                |
 | [GearboxMiddleware](Pipeline/Middlewares/GearboxMiddleware.cs)             | **Manual model shifter** (opt-in). Binds models to gear positions and re-routes *every* request to whichever gear is engaged, flipped from a small browser UI. Neutral honors the client's own model choice. See [Gearbox](#gearbox-middleware) below.                                                                                                                                  |
+| [PixelPressMiddleware](Pipeline/Middlewares/PixelPressMiddleware.cs)       | **Text-to-image token squeeze** (opt-in). Renders bulky prompt text into a dense PNG and swaps it in as an `image_url` part, so a **vision-capable** model reads it at a fixed image-token cost instead of per-character text tokens. Inspired by [pxpipe](https://github.com/teamchong/pxpipe). Lossy (the model OCRs the pixels), so off by default. See [PixelPress](#pixelpress-middleware) below. |
 
 These run after `LoggingChatMiddleware` (which stays outermost so it reports the
 request as the client sent it). Because each is fail-open and only engages when
@@ -261,6 +263,40 @@ registered Copilot or `OpenAiProviders` entry — e.g. a local Ollama added ther
   "DecompressResponses": false, // expand caveman replies on the way downstream
   "Roles": [ "user" ],         // which message roles to compress
   "MinCharacters": 400          // skip content shorter than this
+}
+```
+
+#### PixelPress middleware
+
+Anthropic (and other vision models) charge a **fixed** number of tokens for an
+image based on its pixel dimensions, not on how much text it depicts. Dense text
+— code, JSON, a big system prompt — can be rasterized so a page of pixels costs
+far fewer tokens than the same characters would as text. The
+[PixelPressMiddleware](Pipeline/Middlewares/PixelPressMiddleware.cs) (inspired by
+[pxpipe](https://github.com/teamchong/pxpipe)) renders qualifying prompt text
+into a monospace PNG and swaps it into the message as an `image_url` content
+part, so the upstream model reads the pixels instead of the text.
+
+- **Inbound only** — selected roles (default: `system` and `user`) whose text is
+  at least `MinCharacters` long are rendered to a PNG data URL. Shorter blocks are
+  left as text, since images carry a fixed token floor. When `IncludeHint` is on,
+  a short text part is prepended telling the model the image contains text to read.
+- **Vision required, and lossy** — the model OCRs the rendered pixels, so exact
+  strings (hashes, long ids) can be misread. Only enable it for a
+  **vision-capable** upstream model, and expect some accuracy loss on dense text.
+
+It runs after the text transforms (so it rasterizes whatever text remains) and is
+**fail-open**: any rendering error leaves the request untouched. Rendering uses
+[SkiaSharp](https://github.com/mono/SkiaSharp). Opt-in via `PixelPress.Enabled`:
+
+```jsonc
+"PixelPress": {
+  "Enabled": true,
+  "Roles": [ "system", "user" ], // which message roles to render
+  "MinCharacters": 2000,          // skip text blocks shorter than this
+  "FontSize": 14,                 // px; smaller is denser but harder to read
+  "MaxColumns": 120,              // hard-wrap width in monospace characters
+  "IncludeHint": true             // prepend a "read the text in the image" note
 }
 ```
 

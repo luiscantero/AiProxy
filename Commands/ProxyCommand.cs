@@ -170,8 +170,8 @@ internal static class ServiceRegistration
         //   JsonCrusher   — losslessly minifies embedded JSON (tool outputs, API/DB payloads).
         //   LogCompressor — squashes redundant log blocks (dupes + low-severity runs).
         //   Caveman       — LLM-driven natural-language compression (opt-in via Caveman.Enabled).
-        //   ModelFallback — retries an unavailable model against prioritized alternatives (opt-in).
-        services.AddSingleton<IChatMiddleware, LoggingChatMiddleware>();
+        //   PixelPress    — renders bulky text to a PNG for vision models (opt-in via PixelPress.Enabled).
+        //   ModelFallback — retries an unavailable model against prioritized alternatives (opt-in).        services.AddSingleton<IChatMiddleware, LoggingChatMiddleware>();
         services.AddSingleton<IChatMiddleware, CacheAlignerMiddleware>();
         services.AddSingleton<IChatMiddleware, JsonCrusherMiddleware>();
         services.AddSingleton<IChatMiddleware, LogCompressorMiddleware>();
@@ -184,6 +184,11 @@ internal static class ServiceRegistration
 
         services.AddSingleton<ICavemanTransformer, CavemanTransformer>();
         services.AddSingleton<IChatMiddleware, CavemanMiddleware>();
+
+        // PixelPress ("pxpipe"-style): render bulky prompt text into a PNG so a vision-capable model
+        // reads it at a fixed image-token cost. Placed after the text transforms so it rasterizes
+        // whatever text remains after they have run. Lossy + vision-only, so opt-in via PixelPress.Enabled.
+        services.AddSingleton<IChatMiddleware, PixelPressMiddleware>();
 
         // Innermost (closest to the upstream call): if the requested model is unavailable, retry
         // against a prioritized list of alternatives. Placed last so a fallback only re-sends the

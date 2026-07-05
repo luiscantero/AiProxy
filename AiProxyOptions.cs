@@ -28,6 +28,13 @@ public sealed class AiProxyOptions
     public GearboxOptions Gearbox { get; set; } = new();
 
     /// <summary>
+    /// PixelPress middleware: renders bulky prompt text into a PNG image so vision-capable models
+    /// read it at a (fixed) image-token cost instead of paying per-character text tokens. Inspired
+    /// by pxpipe. Lossy and vision-only, so it is disabled by default.
+    /// </summary>
+    public PixelPressOptions PixelPress { get; set; } = new();
+
+    /// <summary>
     /// OpenAI-compatible upstreams to expose (OpenAI, OpenRouter, Groq, DeepSeek, Gemini's
     /// OpenAI endpoint, local runtimes, ...). Each entry becomes its own auth provider that
     /// can be connected with <c>AiProxy connect &lt;name&gt;</c>. Adding a new provider is
@@ -101,6 +108,44 @@ public sealed class CavemanOptions
     /// justify an extra LLM round-trip. Default 400.
     /// </summary>
     public int MinCharacters { get; set; } = 400;
+}
+
+/// <summary>
+/// Configuration for the PixelPress middleware. Bulky prompt text is rendered into a dense PNG
+/// image and swapped in as an <c>image_url</c> content part, so a vision-capable upstream model
+/// reads it at a fixed image-token cost instead of paying per-character text tokens. The transform
+/// is inbound-only, lossy (the model OCRs the pixels), and requires a vision model, so it is
+/// disabled by default and fail-open.
+/// </summary>
+public sealed class PixelPressOptions
+{
+    /// <summary>Master switch. When false the middleware passes every request through untouched.</summary>
+    public bool Enabled { get; set; }
+
+    /// <summary>
+    /// Which message roles to render. Bulky, mostly-static content (the system prompt and tool
+    /// documentation) yields the biggest savings. Default: "system" and "user".
+    /// </summary>
+    public List<string> Roles { get; set; } = new() { "system", "user" };
+
+    /// <summary>
+    /// Only render text blocks at least this long. Images have a fixed token floor, so short text
+    /// is cheaper left as-is. Default 2000.
+    /// </summary>
+    public int MinCharacters { get; set; } = 2000;
+
+    /// <summary>Font size in pixels used to rasterize the text. Smaller is denser (fewer image
+    /// tokens) but harder for the model to read reliably. Default 14.</summary>
+    public int FontSize { get; set; } = 14;
+
+    /// <summary>Hard-wrap width in monospace characters per line. Default 120.</summary>
+    public int MaxColumns { get; set; } = 120;
+
+    /// <summary>
+    /// Prepend a short text instruction telling the model the image contains rendered text to read.
+    /// Default true.
+    /// </summary>
+    public bool IncludeHint { get; set; } = true;
 }
 
 /// <summary>
