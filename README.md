@@ -28,6 +28,9 @@ editors, or scripts at `http://localhost:11434` and bring your own AI models.
 - **Model fallback / failover** — Transparently retry against a prioritized list
   of alternative models on outages, rate limits, or transient errors. *Ride out
   a provider outage by failing over from one vendor to another mid-request.*
+- **Gearbox / model shifter** — Bind models to gear positions and shift the whole
+  proxy onto one from a small browser UI. *Flip every request between Haiku, Opus,
+  GPT, or Neutral with a click — no editor round-trip.*
 - **Extensible by design** — Drop in your own ASP.NET-style middleware to
   transform requests and responses. *Add custom logging, redaction, or prompt
   rewriting in a few lines.*
@@ -213,6 +216,7 @@ unchanged, so a middleware can never break a request.
 | [LogCompressorMiddleware](Pipeline/Middlewares/LogCompressorMiddleware.cs) | **Squashes log blocks.** When content looks like logs, it collapses consecutive duplicate lines (ignoring volatile timestamps) and thins long runs of low-severity `TRACE`/`DEBUG`/`INFO` lines, while always preserving `WARN`/`ERROR`/`FATAL`/`CRITICAL` lines and stack traces.                                                                                                        |
 | [CavemanMiddleware](Pipeline/Middlewares/CavemanMiddleware.cs)             | **LLM-driven natural-language compression** (opt-in). Delegates [caveman compression](https://github.com/wilpel/caveman-compression) to a configured model (typically a local Ollama) to strip grammar/filler from prompt content while preserving facts, then optionally expands caveman replies back to fluent prose. See [Caveman compression](#caveman-compression-middleware) below. |
 | [ModelFallbackMiddleware](Pipeline/Middlewares/ModelFallbackMiddleware.cs) | **Model fallback / failover** (opt-in). When a model is unavailable (provider outage, rate limit, transient `5xx`), it transparently retries the request against a prioritized list of alternative models — which may live on different providers. See [Model fallback](#model-fallback-middleware) below.                                                                                |
+| [GearboxMiddleware](Pipeline/Middlewares/GearboxMiddleware.cs)             | **Manual model shifter** (opt-in). Binds models to gear positions and re-routes *every* request to whichever gear is engaged, flipped from a small browser UI. Neutral honors the client's own model choice. See [Gearbox](#gearbox-middleware) below.                                                                                                                                  |
 
 These run after `LoggingChatMiddleware` (which stays outermost so it reports the
 request as the client sent it). Because each is fail-open and only engages when
@@ -302,6 +306,52 @@ already-transformed request with a different model id. Opt-in via
   ]
 }
 ```
+
+#### Gearbox middleware
+
+Inspired by the ["Model Shift" gear-shifter idea](https://x.com/VaibhavSisinty/status/2072983741396582475),
+the [GearboxMiddleware](Pipeline/Middlewares/GearboxMiddleware.cs) turns model
+selection into a **manual transmission**. You bind each gear position to a model
+in configuration, then flip between them from a small shifter UI in your browser.
+Every incoming chat request is re-routed onto whichever gear is currently
+engaged — no matter which model the client (e.g. VS Code) actually asked for.
+
+- **Neutral** (`N`, the default) is a pass-through: the client's own model choice
+  is honored. Any gear with an empty `Model` behaves the same way — handy for a
+  "default" position (e.g. `R`).
+- Engaging a gear swaps the request's model **and** re-resolves the owning
+  provider, so a gear can point at a model on *any* connected provider.
+- It is **fail-open**: if the engaged gear names a model no connected provider
+  exposes, the request is left on its original model instead of failing.
+- It runs near the top of the pipeline (just after logging), so the chosen model
+  flows through the rest of the transforms and the fallback stage.
+
+Open the shifter at **`/gearbox`** (printed on startup). It talks to two tiny
+routes — `GET /gearbox/state` and `POST /gearbox/shift` (`{ "position": "3" }`) —
+which are only mapped when the gearbox is enabled. Because the engaged gear is
+in-memory runtime state, shifting takes effect on the *next* request and resets
+to `Selected` when the proxy restarts.
+
+Opt-in via `Gearbox.Enabled`:
+
+```jsonc
+"Gearbox": {
+  "Enabled": true,
+  "Selected": "N",              // gear engaged at startup ("N" = Neutral / no override)
+  "Gears": [
+    { "Position": "1", "Label": "Haiku",   "Model": "claude-haiku-4.6" },
+    { "Position": "2", "Label": "Flash",   "Model": "gemini-3.1-flash" },
+    { "Position": "3", "Label": "Sonnet",  "Model": "claude-sonnet-4.6" },
+    { "Position": "4", "Label": "Opus",    "Model": "claude-opus-4" },
+    { "Position": "5", "Label": "GPT",     "Model": "gpt-5.5" },
+    { "Position": "R", "Label": "Default", "Model": "" }   // empty model = pass-through
+  ]
+}
+```
+
+> The models you list must be exposed by a connected provider (they show up in
+> `/v1/models`). The client still has to request a model the proxy exposes — the
+> gearbox then redirects that request onto the engaged gear's model.
 
 #### Ideas for future middlewares
 

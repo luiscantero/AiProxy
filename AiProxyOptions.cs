@@ -21,6 +21,13 @@ public sealed class AiProxyOptions
     public FallbackOptions Fallback { get; set; } = new();
 
     /// <summary>
+    /// Gearbox middleware: a manual "model shifter". The user maps models to gear positions and
+    /// flips between them from a small web UI; every incoming chat request is transparently
+    /// re-routed to whichever model is currently "in gear" (Neutral leaves the request untouched).
+    /// </summary>
+    public GearboxOptions Gearbox { get; set; } = new();
+
+    /// <summary>
     /// OpenAI-compatible upstreams to expose (OpenAI, OpenRouter, Groq, DeepSeek, Gemini's
     /// OpenAI endpoint, local runtimes, ...). Each entry becomes its own auth provider that
     /// can be connected with <c>AiProxy connect &lt;name&gt;</c>. Adding a new provider is
@@ -129,6 +136,52 @@ public sealed class FallbackChain
 {
     /// <summary>Models in priority order. The first is the requested model; the rest are fallbacks.</summary>
     public List<string> Models { get; set; } = new();
+}
+
+
+/// <summary>
+/// Configuration for the gearbox ("model shift") middleware. Like the gear shifter of a manual
+/// car, each gear position is bound to a model; the user shifts between them from a small web UI
+/// (served at <c>/gearbox</c>) and every chat request is transparently re-routed to whichever
+/// model is currently in gear. The <c>Neutral</c> position (and any gear with an empty
+/// <see cref="GearOptions.Model"/>) is a pass-through: the client's own model choice is honored.
+/// Disabled by default.
+/// </summary>
+public sealed class GearboxOptions
+{
+    /// <summary>Master switch. When false the middleware passes every request through untouched
+    /// and the web UI endpoints are not mapped.</summary>
+    public bool Enabled { get; set; }
+
+    /// <summary>
+    /// The gear the proxy starts in, matched against <see cref="GearOptions.Position"/>. The
+    /// special value <c>"N"</c> (case-insensitive) means Neutral — no override. Defaults to Neutral.
+    /// </summary>
+    public string Selected { get; set; } = "N";
+
+    /// <summary>
+    /// The gears available on the shifter, in display order. Each binds a position (e.g. "1".."6"
+    /// or "R") to the model engaged when that gear is selected.
+    /// </summary>
+    public List<GearOptions> Gears { get; set; } = new();
+}
+
+/// <summary>
+/// A single gear position on the <see cref="GearboxOptions"/> shifter.
+/// </summary>
+public sealed class GearOptions
+{
+    /// <summary>Short position label shown on the shifter, e.g. "1", "2", ... "R".</summary>
+    public string Position { get; set; } = "";
+
+    /// <summary>Human-friendly name for the gear, e.g. "Haiku" or "Opus". Optional.</summary>
+    public string Label { get; set; } = "";
+
+    /// <summary>
+    /// The model engaged when this gear is selected. Must be a model exposed by a connected
+    /// provider. An empty value makes the gear a pass-through (equivalent to Neutral).
+    /// </summary>
+    public string Model { get; set; } = "";
 }
 
 

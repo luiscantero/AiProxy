@@ -51,6 +51,14 @@ public static class ProxyCommand
             app.MapPost("/api/chat", OllamaEndpoints.Chat);
         }
 
+        if (optionsAtBuild.Gearbox.Enabled)
+        {
+            // Gearbox control surface: a browser UI plus its tiny state/shift API.
+            app.MapGet("/gearbox", GearboxEndpoint.Page);
+            app.MapGet("/gearbox/state", GearboxEndpoint.GetState);
+            app.MapPost("/gearbox/shift", GearboxEndpoint.Shift);
+        }
+
         var options = optionsAtBuild;
         var logger = app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("AiProxy");
 
@@ -76,6 +84,13 @@ public static class ProxyCommand
         if (!options.Apis.Ollama && !options.Apis.OpenAi)
         {
             Console.WriteLine("  WARNING      : Both Apis.Ollama and Apis.OpenAi are disabled. No routes are exposed.");
+        }
+
+        if (options.Gearbox.Enabled)
+        {
+            Console.WriteLine();
+            Console.WriteLine("  Gearbox      : Open the model shifter in a browser.");
+            Console.WriteLine($"                 {options.ListenUrl.TrimEnd('/')}/gearbox");
         }
 
         // Warn if no auth state, listing models per connected provider.
@@ -160,6 +175,12 @@ internal static class ServiceRegistration
         services.AddSingleton<IChatMiddleware, CacheAlignerMiddleware>();
         services.AddSingleton<IChatMiddleware, JsonCrusherMiddleware>();
         services.AddSingleton<IChatMiddleware, LogCompressorMiddleware>();
+
+        // Gearbox ("model shift"): a small web UI lets the user shift the whole proxy onto a chosen
+        // model. Registered right after logging so the engaged model flows through every transform.
+        // The engaged gear lives in the singleton GearboxState (shared with the /gearbox endpoints).
+        services.AddSingleton<GearboxState>();
+        services.AddSingleton<IChatMiddleware, GearboxMiddleware>();
 
         services.AddSingleton<ICavemanTransformer, CavemanTransformer>();
         services.AddSingleton<IChatMiddleware, CavemanMiddleware>();
