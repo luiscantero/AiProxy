@@ -22,7 +22,9 @@ public static class ResponsesApiTranslator
     /// <summary>
     /// Converts a chat-completions request body into the Responses API equivalent.
     /// Fields are whitelisted rather than copied wholesale, because the Responses API rejects
-    /// unknown properties (<c>stop</c> and <c>stream_options</c> have no equivalent and are dropped).
+    /// unknown properties (<c>stop</c> and <c>stream_options</c> have no equivalent), and the
+    /// reasoning models served there reject the sampling knobs (<c>temperature</c>, <c>top_p</c>)
+    /// that clients send by default.
     /// </summary>
     public static JsonObject ToResponsesRequest(JsonObject chatRequest)
     {
@@ -30,8 +32,6 @@ public static class ResponsesApiTranslator
 
         if (chatRequest["model"] is { } model) responses["model"] = model.DeepClone();
         if (chatRequest["stream"] is { } stream) responses["stream"] = stream.DeepClone();
-        if (chatRequest["temperature"] is { } temperature) responses["temperature"] = temperature.DeepClone();
-        if (chatRequest["top_p"] is { } topP) responses["top_p"] = topP.DeepClone();
 
         // The output cap was renamed by the Responses API.
         if ((chatRequest["max_completion_tokens"] ?? chatRequest["max_tokens"]) is { } maxTokens)

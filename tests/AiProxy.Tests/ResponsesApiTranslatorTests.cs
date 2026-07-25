@@ -42,6 +42,8 @@ public class ResponsesApiTranslatorTests
         var request = new JsonObject
         {
             ["model"] = "gpt-5.6-sol",
+            ["temperature"] = 0.7,
+            ["top_p"] = 0.9,
             ["stop"] = new JsonArray { "END" },
             ["stream_options"] = new JsonObject { ["include_usage"] = true },
             ["messages"] = new JsonArray()
@@ -49,6 +51,8 @@ public class ResponsesApiTranslatorTests
 
         var result = ResponsesApiTranslator.ToResponsesRequest(request);
 
+        Assert.Null(result["temperature"]);
+        Assert.Null(result["top_p"]);
         Assert.Null(result["stop"]);
         Assert.Null(result["stream_options"]);
     }
