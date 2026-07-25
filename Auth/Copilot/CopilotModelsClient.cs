@@ -39,11 +39,12 @@ public sealed class CopilotModelsClient
         var entries = dto.Data ?? new List<ModelEntry>();
 
         // Filter: must support /chat/completions, be chat-capable, picker-enabled, support streaming.
-        // Defensive: missing fields default to "include".
-        bool IsUsable(ModelEntry m)
+        // Defensive: missing fields default to "include". Returns null when the model is usable,
+        // otherwise a human-readable reason so 'AiProxy models copilot' can explain omissions.
+        static string? RejectionReason(ModelEntry m)
         {
-            if (string.IsNullOrEmpty(m.Id)) return false;
-            if (m.ModelPickerEnabled == false) return false;
+            if (string.IsNullOrEmpty(m.Id)) return "missing id";
+            if (m.ModelPickerEnabled == false) return "model_picker_enabled=false";
 
             // The Copilot 'supported_endpoints' field is the most reliable signal.
             // Models like gpt-5.5 are 'chat'-typed but only support /responses, not
@@ -51,32 +52,47 @@ public sealed class CopilotModelsClient
             if (m.SupportedEndpoints is { Count: > 0 } eps
                 && !eps.Any(e => e.Contains("/chat/completions", StringComparison.OrdinalIgnoreCase)))
             {
-                return false;
+                return $"no /chat/completions endpoint (supports: {string.Join(", ", eps)})";
             }
 
             if (m.Capabilities is { } caps)
             {
                 if (!string.IsNullOrEmpty(caps.Type) && !string.Equals(caps.Type, "chat", StringComparison.OrdinalIgnoreCase))
                 {
-                    return false;
+                    return $"capabilities.type={caps.Type}";
                 }
                 if (caps.Supports is { Streaming: false })
                 {
-                    return false;
+                    return "streaming not supported";
                 }
             }
-            return true;
+            return null;
         }
 
-        var usable = entries
-            .Where(IsUsable)
-            .OrderBy(e => e.Id, StringComparer.Ordinal)
-            .ToList();
+        var usable = new List<ModelEntry>();
+        var excluded = new List<ExcludedModel>();
+        foreach (var entry in entries)
+        {
+            var reason = RejectionReason(entry);
+            if (reason is null)
+            {
+                usable.Add(entry);
+            }
+            else
+            {
+                excluded.Add(new ExcludedModel(entry.Id ?? "(no id)", reason));
+            }
+        }
 
-        return new ModelsResult(usable);
+        usable.Sort((a, b) => StringComparer.Ordinal.Compare(a.Id, b.Id));
+        excluded.Sort((a, b) => StringComparer.Ordinal.Compare(a.Id, b.Id));
+
+        return new ModelsResult(usable, excluded);
     }
 
-    public sealed record ModelsResult(IReadOnlyList<ModelEntry> Models);
+    public sealed record ModelsResult(IReadOnlyList<ModelEntry> Models, IReadOnlyList<ExcludedModel> Excluded);
+
+    public sealed record ExcludedModel(string Id, string Reason);
 
     public sealed record ModelEntry(
         [property: JsonPropertyName("id")] string Id,

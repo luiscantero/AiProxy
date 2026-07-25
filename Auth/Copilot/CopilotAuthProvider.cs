@@ -65,7 +65,6 @@ public sealed class CopilotAuthProvider : IAuthProvider
 
         // 3. Fetch models
         var modelsResult = await _modelsClient.ListAsync(copilot.Token, copilot.ApiBaseUrl, cancellationToken).ConfigureAwait(false);
-        var models = modelsResult.Models;
 
         var state = new AuthState
         {
@@ -76,7 +75,7 @@ public sealed class CopilotAuthProvider : IAuthProvider
             UpstreamApiBaseUrl = copilot.ApiBaseUrl
         };
 
-        await SelectModelsAndSaveAsync(state, models, existing, cancellationToken).ConfigureAwait(false);
+        await SelectModelsAndSaveAsync(state, modelsResult, existing, cancellationToken).ConfigureAwait(false);
     }
 
     public async Task RunSelectModelsAsync(CancellationToken cancellationToken = default)
@@ -94,17 +93,17 @@ public sealed class CopilotAuthProvider : IAuthProvider
         var apiBaseUrl = await GetUpstreamApiBaseUrlAsync(cancellationToken).ConfigureAwait(false);
 
         var modelsResult = await _modelsClient.ListAsync(token, apiBaseUrl, cancellationToken).ConfigureAwait(false);
-        var models = modelsResult.Models;
 
-        await SelectModelsAndSaveAsync(existing, models, existing, cancellationToken).ConfigureAwait(false);
+        await SelectModelsAndSaveAsync(existing, modelsResult, existing, cancellationToken).ConfigureAwait(false);
     }
 
     private async Task SelectModelsAndSaveAsync(
         AuthState baseState,
-        IReadOnlyList<CopilotModelsClient.ModelEntry> models,
+        CopilotModelsClient.ModelsResult modelsResult,
         AuthState? existing,
         CancellationToken cancellationToken)
     {
+        var models = modelsResult.Models;
         if (models.Count == 0)
         {
             throw new InvalidOperationException("Upstream returned no usable models (after filtering for chat-capable / picker-enabled).");
@@ -120,6 +119,18 @@ public sealed class CopilotAuthProvider : IAuthProvider
             Console.WriteLine($"  [{i + 1,2}] {label}{ctxLabel}");
         }
         Console.WriteLine();
+
+        // Explain omissions: the upstream lists models this proxy cannot drive over
+        // /chat/completions, and silently dropping them looks like models are "missing".
+        if (modelsResult.Excluded is { Count: > 0 } excluded)
+        {
+            Console.WriteLine($"Not listed ({excluded.Count}):");
+            foreach (var e in excluded)
+            {
+                Console.WriteLine($"       {e.Id}  -  {e.Reason}");
+            }
+            Console.WriteLine();
+        }
 
         var defaultSelection = existing?.SelectedModels is { Count: > 0 } prev
             ? string.Join(",", prev.Select(id => (models.Select((m, i) => (m, i)).FirstOrDefault(x => x.m.Id == id).i + 1)).Where(i => i > 0))
