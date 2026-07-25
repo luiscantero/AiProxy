@@ -38,21 +38,23 @@ public sealed class CopilotModelsClient
 
         var entries = dto.Data ?? new List<ModelEntry>();
 
-        // Filter: must support /chat/completions, be chat-capable, picker-enabled, support streaming.
-        // Defensive: missing fields default to "include". Returns null when the model is usable,
-        // otherwise a human-readable reason so 'AiProxy models copilot' can explain omissions.
+        // Filter: must be reachable over /chat/completions or /responses, chat-capable,
+        // picker-enabled and streaming. Defensive: missing fields default to "include".
+        // Returns null when the model is usable, otherwise a human-readable reason so
+        // 'AiProxy models copilot' can explain omissions.
         static string? RejectionReason(ModelEntry m)
         {
             if (string.IsNullOrEmpty(m.Id)) return "missing id";
             if (m.ModelPickerEnabled == false) return "model_picker_enabled=false";
 
-            // The Copilot 'supported_endpoints' field is the most reliable signal.
-            // Models like gpt-5.5 are 'chat'-typed but only support /responses, not
-            // /chat/completions, so they 400 if forwarded to chat completions.
+            // The Copilot 'supported_endpoints' field is the most reliable signal. Models like
+            // gpt-5.5 and the gpt-5.6-* family are 'chat'-typed but serve only /responses, so
+            // they are reachable - just over a different wire format.
             if (m.SupportedEndpoints is { Count: > 0 } eps
-                && !eps.Any(e => e.Contains("/chat/completions", StringComparison.OrdinalIgnoreCase)))
+                && !HasHttpEndpoint(eps, "/chat/completions")
+                && !HasHttpEndpoint(eps, "/responses"))
             {
-                return $"no /chat/completions endpoint (supports: {string.Join(", ", eps)})";
+                return $"no /chat/completions or /responses endpoint (supports: {string.Join(", ", eps)})";
             }
 
             if (m.Capabilities is { } caps)
@@ -93,6 +95,23 @@ public sealed class CopilotModelsClient
     public sealed record ModelsResult(IReadOnlyList<ModelEntry> Models, IReadOnlyList<ExcludedModel> Excluded);
 
     public sealed record ExcludedModel(string Id, string Reason);
+
+    /// <summary>
+    /// True when the model serves only the Responses API, so the proxy must translate the
+    /// request instead of posting it to /chat/completions.
+    /// </summary>
+    public static bool UsesResponsesApi(ModelEntry model) =>
+        model.SupportedEndpoints is { Count: > 0 } endpoints
+        && !HasHttpEndpoint(endpoints, "/chat/completions")
+        && HasHttpEndpoint(endpoints, "/responses");
+
+    /// <summary>
+    /// Matches an HTTP endpoint path, ignoring the parallel WebSocket entries Copilot also
+    /// advertises ("ws:/responses"), which this proxy does not speak.
+    /// </summary>
+    private static bool HasHttpEndpoint(IReadOnlyList<string> endpoints, string path) =>
+        endpoints.Any(e => !e.StartsWith("ws:", StringComparison.OrdinalIgnoreCase)
+                           && e.EndsWith(path, StringComparison.OrdinalIgnoreCase));
 
     public sealed record ModelEntry(
         [property: JsonPropertyName("id")] string Id,

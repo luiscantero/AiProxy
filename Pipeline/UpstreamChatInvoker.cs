@@ -30,9 +30,18 @@ public sealed class UpstreamChatInvoker
 
         var baseUrl = await context.Provider.GetUpstreamApiBaseUrlAsync(cancellationToken).ConfigureAwait(false)
                       ?? _options.Value.Copilot.UpstreamBaseUrl;
-        var url = baseUrl.TrimEnd('/') + "/chat/completions";
 
-        var bodyBytes = JsonSerializer.SerializeToUtf8Bytes(context.UpstreamRequest, JsonOptions);
+        // A few upstream models serve only /responses and reject /chat/completions. The pipeline
+        // speaks chat-completions throughout, so the swap happens here and nowhere else.
+        var modelInfos = await context.Provider.GetModelInfosAsync(cancellationToken).ConfigureAwait(false);
+        var useResponsesApi = modelInfos.TryGetValue(context.Model, out var modelInfo) && modelInfo.UsesResponsesApi;
+
+        var url = baseUrl.TrimEnd('/') + (useResponsesApi ? "/responses" : "/chat/completions");
+        var payload = useResponsesApi
+            ? ResponsesApiTranslator.ToResponsesRequest(context.UpstreamRequest)
+            : context.UpstreamRequest;
+
+        var bodyBytes = JsonSerializer.SerializeToUtf8Bytes(payload, JsonOptions);
 
         var http = _httpClientFactory.CreateClient("upstream");
         var request = new HttpRequestMessage(HttpMethod.Post, url)
@@ -58,17 +67,24 @@ public sealed class UpstreamChatInvoker
             throw new UpstreamException(status, errorBody);
         }
 
-        context.ResponseChunks = context.IsStreaming
-            ? ReadStreamingChunksAsync(response, cancellationToken)
-            : ReadNonStreamingChunkAsync(response, cancellationToken);
+        context.ResponseChunks = (context.IsStreaming, useResponsesApi) switch
+        {
+            (true, true) => ReadStreamingChunksAsync(response, ResponsesApiTranslator.ParseStreamEvent, cancellationToken),
+            (true, false) => ReadStreamingChunksAsync(response, ParseChunk, cancellationToken),
+            (false, true) => ReadResponsesNonStreamingChunkAsync(response, cancellationToken),
+            (false, false) => ReadNonStreamingChunkAsync(response, cancellationToken)
+        };
     }
 
     /// <summary>
-    /// Parses the upstream Server-Sent Events stream into normalized chunks. The
-    /// <paramref name="response"/> is owned by this iterator and disposed when enumeration ends.
+    /// Parses the upstream Server-Sent Events stream into normalized chunks, delegating the
+    /// per-frame shape to <paramref name="parser"/> so the same loop serves both the
+    /// chat-completions and Responses wire formats. The <paramref name="response"/> is owned by
+    /// this iterator and disposed when enumeration ends.
     /// </summary>
     private static async IAsyncEnumerable<ChatResponseChunk> ReadStreamingChunksAsync(
         HttpResponseMessage response,
+        Func<string, ChatResponseChunk?> parser,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
         using (response)
@@ -89,7 +105,7 @@ public sealed class UpstreamChatInvoker
                 ChatResponseChunk? chunk;
                 try
                 {
-                    chunk = ParseChunk(payload);
+                    chunk = parser(payload);
                 }
                 catch (JsonException)
                 {
@@ -101,6 +117,21 @@ public sealed class UpstreamChatInvoker
                     yield return chunk;
                 }
             }
+        }
+    }
+
+    /// <summary>
+    /// Reads a complete (non-streamed) Responses API body as a single normalized chunk.
+    /// </summary>
+    private static async IAsyncEnumerable<ChatResponseChunk> ReadResponsesNonStreamingChunkAsync(
+        HttpResponseMessage response,
+        [EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        using (response)
+        {
+            await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+            using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken).ConfigureAwait(false);
+            yield return ResponsesApiTranslator.ParseNonStreamingResponse(doc.RootElement);
         }
     }
 

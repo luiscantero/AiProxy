@@ -172,7 +172,8 @@ public sealed class CopilotAuthProvider : IAuthProvider
                 MaxContextWindowTokens = m.Capabilities?.Limits?.MaxContextWindowTokens,
                 MaxOutputTokens = m.Capabilities?.Limits?.MaxOutputTokens,
                 SupportsVision = m.Capabilities?.Supports?.Vision,
-                SupportsToolCalls = m.Capabilities?.Supports?.ToolCalls
+                SupportsToolCalls = m.Capabilities?.Supports?.ToolCalls,
+                UsesResponsesApi = CopilotModelsClient.UsesResponsesApi(m)
             },
             StringComparer.Ordinal);
 

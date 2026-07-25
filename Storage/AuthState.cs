@@ -48,4 +48,11 @@ public sealed record ModelInfo
     /// report it, in which case we assume tools are supported.
     /// </summary>
     public bool? SupportsToolCalls { get; init; }
+
+    /// <summary>
+    /// Whether this model must be driven through the upstream's <c>/responses</c> endpoint
+    /// instead of <c>/chat/completions</c>. Newer OpenAI models on Copilot serve only the
+    /// Responses API and reject chat completions.
+    /// </summary>
+    public bool UsesResponsesApi { get; init; }
 }
