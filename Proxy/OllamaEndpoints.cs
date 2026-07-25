@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Text.Json.Serialization;
 using AiProxy.Auth;
 using AiProxy.Pipeline;
 using Microsoft.AspNetCore.Http;
@@ -275,7 +276,7 @@ public static class OllamaEndpoints
     // Translation helpers
     // ----------------------------------------------------------------------
 
-    private static JsonObject ConvertMessage(OllamaMessage m)
+    internal static JsonObject ConvertMessage(OllamaMessage m)
     {
         var obj = new JsonObject
         {
@@ -310,11 +311,57 @@ public static class OllamaEndpoints
         if (m.ToolCalls is { Count: > 0 } tc)
         {
             var toolArray = new JsonArray();
-            foreach (var call in tc) toolArray.Add(JsonNode.Parse(call.GetRawText()));
+            foreach (var call in tc) toolArray.Add(ConvertToolCall(call));
             obj["tool_calls"] = toolArray;
         }
-        if (!string.IsNullOrEmpty(m.Name)) obj["name"] = m.Name;
+
+        // A tool result is only accepted upstream when it points back at the call it answers.
+        if (!string.IsNullOrEmpty(m.ToolCallId)) obj["tool_call_id"] = m.ToolCallId;
+
+        var name = !string.IsNullOrEmpty(m.Name) ? m.Name : m.ToolName;
+        if (!string.IsNullOrEmpty(name)) obj["name"] = name;
         return obj;
+    }
+
+    /// <summary>
+    /// Rewrites an Ollama tool call into the OpenAI shape: the upstream requires an <c>id</c>
+    /// and a <c>type</c>, and expects <c>function.arguments</c> as a JSON string where Ollama
+    /// clients send it as an object.
+    /// </summary>
+    private static JsonObject ConvertToolCall(JsonElement call)
+    {
+        string? id = null;
+        if (call.TryGetProperty("id", out var idElement) && idElement.ValueKind == JsonValueKind.String)
+        {
+            id = idElement.GetString();
+        }
+
+        string? name = null;
+        var arguments = "{}";
+        if (call.TryGetProperty("function", out var function) && function.ValueKind == JsonValueKind.Object)
+        {
+            if (function.TryGetProperty("name", out var nameElement) && nameElement.ValueKind == JsonValueKind.String)
+            {
+                name = nameElement.GetString();
+            }
+            if (function.TryGetProperty("arguments", out var argumentsElement))
+            {
+                arguments = argumentsElement.ValueKind == JsonValueKind.String
+                    ? argumentsElement.GetString() ?? "{}"
+                    : argumentsElement.GetRawText();
+            }
+        }
+
+        return new JsonObject
+        {
+            ["id"] = string.IsNullOrEmpty(id) ? $"call_{Guid.NewGuid():N}" : id,
+            ["type"] = "function",
+            ["function"] = new JsonObject
+            {
+                ["name"] = name ?? "",
+                ["arguments"] = arguments
+            }
+        };
     }
 
     /// <summary>
@@ -370,6 +417,7 @@ public static class OllamaEndpoints
         var lastFinishReason = "stop";
         var promptTokens = 0;
         var completionTokens = 0;
+        var toolCalls = new ToolCallAccumulator();
 
         await foreach (var chunk in chunks.WithCancellation(cancellationToken).ConfigureAwait(false))
         {
@@ -377,8 +425,16 @@ public static class OllamaEndpoints
             if (chunk.CompletionTokens is { } ct) completionTokens = ct;
             if (chunk.FinishReason is { } fr) lastFinishReason = fr;
 
+            // Upstream spreads a single tool call over many frames (id and name first, then
+            // argument text in pieces). Ollama clients report every call they see straight
+            // through to the tool, so hold fragments back until the stream completes.
+            if (chunk.ToolCalls is { Count: > 0 } fragments)
+            {
+                foreach (var fragment in fragments) toolCalls.Add(fragment);
+            }
+
             // Skip frames that have nothing to deliver.
-            if (chunk.ContentDelta is null && chunk.ToolCalls is null)
+            if (string.IsNullOrEmpty(chunk.ContentDelta))
             {
                 continue;
             }
@@ -387,7 +443,19 @@ public static class OllamaEndpoints
             {
                 ["model"] = model,
                 ["created_at"] = DateTimeOffset.UtcNow.ToString("yyyy-MM-ddTHH:mm:ss.fffffffK"),
-                ["message"] = BuildMessage(chunk.ContentDelta ?? "", chunk.ToolCalls),
+                ["message"] = BuildMessage(chunk.ContentDelta, null),
+                ["done"] = false
+            };
+            await WriteNdjsonAsync(outputStream, frame, cancellationToken).ConfigureAwait(false);
+        }
+
+        if (toolCalls.Build() is { Count: > 0 } completedCalls)
+        {
+            var frame = new Dictionary<string, object?>
+            {
+                ["model"] = model,
+                ["created_at"] = DateTimeOffset.UtcNow.ToString("yyyy-MM-ddTHH:mm:ss.fffffffK"),
+                ["message"] = BuildMessage("", completedCalls),
                 ["done"] = false
             };
             await WriteNdjsonAsync(outputStream, frame, cancellationToken).ConfigureAwait(false);
@@ -411,7 +479,7 @@ public static class OllamaEndpoints
         await WriteNdjsonAsync(outputStream, done, cancellationToken).ConfigureAwait(false);
     }
 
-    private static object BuildMessage(string content, IReadOnlyList<JsonElement>? toolCalls)
+    private static object BuildMessage(string content, IReadOnlyList<object>? toolCalls)
     {
         var dict = new Dictionary<string, object?>
         {
@@ -442,6 +510,7 @@ public static class OllamaEndpoints
         var finishReason = "stop";
         var promptTokens = 0;
         var completionTokens = 0;
+        var toolCalls = new ToolCallAccumulator();
 
         await foreach (var chunk in chunks.WithCancellation(cancellationToken).ConfigureAwait(false))
         {
@@ -449,13 +518,17 @@ public static class OllamaEndpoints
             if (chunk.FinishReason is { } fr) finishReason = fr;
             if (chunk.PromptTokens is { } pt) promptTokens = pt;
             if (chunk.CompletionTokens is { } ct) completionTokens = ct;
+            if (chunk.ToolCalls is { Count: > 0 } fragments)
+            {
+                foreach (var fragment in fragments) toolCalls.Add(fragment);
+            }
         }
 
         return new
         {
             model,
             created_at = DateTimeOffset.UtcNow.ToString("yyyy-MM-ddTHH:mm:ss.fffffffK"),
-            message = new { role = "assistant", content = content.ToString() },
+            message = BuildMessage(content.ToString(), toolCalls.Build()),
             done_reason = finishReason,
             done = true,
             total_duration = 0,
@@ -475,8 +548,99 @@ public static class OllamaEndpoints
         await context.Response.WriteAsync(json);
     }
 
+    /// <summary>
+    /// Reassembles OpenAI-style streamed tool-call fragments into whole Ollama tool calls.
+    /// Also accepts an already-complete call as a single fragment, which is what the
+    /// non-streaming path produces.
+    /// </summary>
+    internal sealed class ToolCallAccumulator
+    {
+        private readonly Dictionary<int, Entry> _entries = new();
+        private int _fallbackIndex;
+
+        public void Add(JsonElement fragment)
+        {
+            if (fragment.ValueKind != JsonValueKind.Object) return;
+
+            var index = fragment.TryGetProperty("index", out var indexElement) && indexElement.TryGetInt32(out var i)
+                ? i
+                : _fallbackIndex++;
+
+            if (!_entries.TryGetValue(index, out var entry))
+            {
+                entry = new Entry();
+                _entries[index] = entry;
+            }
+
+            if (fragment.TryGetProperty("id", out var idElement) && idElement.ValueKind == JsonValueKind.String)
+            {
+                entry.Id = idElement.GetString();
+            }
+            if (fragment.TryGetProperty("function", out var function) && function.ValueKind == JsonValueKind.Object)
+            {
+                if (function.TryGetProperty("name", out var nameElement) && nameElement.ValueKind == JsonValueKind.String)
+                {
+                    entry.Name = nameElement.GetString();
+                }
+                if (function.TryGetProperty("arguments", out var argumentsElement) && argumentsElement.ValueKind == JsonValueKind.String)
+                {
+                    entry.Arguments.Append(argumentsElement.GetString());
+                }
+            }
+        }
+
+        public List<object> Build()
+        {
+            var result = new List<object>();
+            foreach (var index in _entries.Keys.Order())
+            {
+                var entry = _entries[index];
+                if (string.IsNullOrEmpty(entry.Name)) continue;
+
+                result.Add(new Dictionary<string, object?>
+                {
+                    ["id"] = string.IsNullOrEmpty(entry.Id) ? $"call_{index}" : entry.Id,
+                    ["type"] = "function",
+                    ["function"] = new Dictionary<string, object?>
+                    {
+                        ["name"] = entry.Name,
+                        // VS Code passes function.arguments straight through as the tool's
+                        // input object, so it must be parsed JSON rather than the raw string
+                        // the OpenAI wire format uses.
+                        ["arguments"] = ParseArguments(entry.Arguments.ToString())
+                    }
+                });
+            }
+            return result;
+        }
+
+        private static JsonNode ParseArguments(string arguments)
+        {
+            if (string.IsNullOrWhiteSpace(arguments)) return new JsonObject();
+            try
+            {
+                return JsonNode.Parse(arguments) ?? new JsonObject();
+            }
+            catch (JsonException)
+            {
+                return new JsonObject();
+            }
+        }
+
+        private sealed class Entry
+        {
+            public string? Id { get; set; }
+            public string? Name { get; set; }
+            public System.Text.StringBuilder Arguments { get; } = new();
+        }
+    }
+
     // ----------------------------------------------------------------------
     // Request DTOs
+    //
+    // Ollama uses snake_case on the wire. The Web serializer defaults to camelCase and its
+    // case-insensitive matching does not bridge underscores, so every snake_case field needs
+    // an explicit name or it binds to null without error.
     // ----------------------------------------------------------------------
 
     public sealed class OllamaChatRequest
@@ -493,15 +657,29 @@ public static class OllamaEndpoints
         public string? Role { get; set; }
         public string? Content { get; set; }
         public string? Name { get; set; }
+
+        [JsonPropertyName("tool_calls")]
         public List<JsonElement>? ToolCalls { get; set; }
+
+        [JsonPropertyName("tool_call_id")]
+        public string? ToolCallId { get; set; }
+
+        [JsonPropertyName("tool_name")]
+        public string? ToolName { get; set; }
+
         public List<string>? Images { get; set; }
     }
 
     public sealed class OllamaOptions
     {
         public double? Temperature { get; set; }
+
+        [JsonPropertyName("top_p")]
         public double? TopP { get; set; }
+
+        [JsonPropertyName("num_predict")]
         public int? NumPredict { get; set; }
+
         public string[]? Stop { get; set; }
     }
 }

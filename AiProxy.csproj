@@ -16,6 +16,10 @@
     <PackageReference Include="SkiaSharp" Version="2.88.9" />
   </ItemGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="AiProxy.Tests" />
+  </ItemGroup>
+
   <!-- The test project lives under tests/; keep its sources out of this app's compilation. -->
   <ItemGroup>
     <Compile Remove="tests/**/*.cs" />
