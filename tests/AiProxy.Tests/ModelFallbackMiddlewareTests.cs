@@ -3,6 +3,7 @@ using AiProxy;
 using AiProxy.Auth;
 using AiProxy.Pipeline;
 using AiProxy.Pipeline.Middlewares;
+using AiProxy.Proxy;
 using AiProxy.Storage;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -149,6 +150,67 @@ public class ModelFallbackMiddlewareTests
 
         Assert.Equal(new[] { "primary", "third" }, models);
         Assert.Equal("third", context.Model);
+    }
+
+    [Fact]
+    public void ValidateModels_returns_no_problems_when_disabled()
+    {
+        var fallback = new FallbackOptions
+        {
+            Enabled = false,
+            Chains = { new FallbackChain { Models = { "primary", "missing" } } },
+        };
+        var middleware = new ModelFallbackMiddleware(
+            Options.Create(OptionsWith(fallback)), Array.Empty<IAuthProvider>());
+
+        var problems = middleware.ValidateModels(Array.Empty<ProviderResolver.ProviderModels>());
+
+        Assert.Empty(problems);
+        Assert.False(fallback.Enabled);
+    }
+
+    [Fact]
+    public void ValidateModels_returns_no_problems_when_every_chain_model_is_available()
+    {
+        var fallback = new FallbackOptions
+        {
+            Enabled = true,
+            Chains = { new FallbackChain { Models = { "primary", "secondary" } } },
+        };
+        var middleware = new ModelFallbackMiddleware(
+            Options.Create(OptionsWith(fallback)), Array.Empty<IAuthProvider>());
+        var providerModels = new[]
+        {
+            new ProviderResolver.ProviderModels(
+                new StubProvider("primary"), new[] { "primary", "secondary" }),
+        };
+
+        var problems = middleware.ValidateModels(providerModels);
+
+        Assert.Empty(problems);
+        Assert.True(fallback.Enabled);
+    }
+
+    [Fact]
+    public void ValidateModels_disables_fallback_and_reports_problem_for_unknown_model()
+    {
+        var fallback = new FallbackOptions
+        {
+            Enabled = true,
+            Chains = { new FallbackChain { Models = { "primary", "missing-model" } } },
+        };
+        var middleware = new ModelFallbackMiddleware(
+            Options.Create(OptionsWith(fallback)), Array.Empty<IAuthProvider>());
+        var providerModels = new[]
+        {
+            new ProviderResolver.ProviderModels(new StubProvider("primary"), new[] { "primary" }),
+        };
+
+        var problems = middleware.ValidateModels(providerModels);
+
+        Assert.False(fallback.Enabled);
+        var problem = Assert.Single(problems);
+        Assert.Contains("missing-model", problem);
     }
 
     private sealed class StubProvider : IAuthProvider

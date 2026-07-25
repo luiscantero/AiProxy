@@ -1,5 +1,7 @@
 using System.Text;
 using System.Text.Json.Nodes;
+using AiProxy.Auth;
+using AiProxy.Proxy;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
@@ -21,15 +23,62 @@ namespace AiProxy.Pipeline.Middlewares;
 /// The middleware is fail-open: any error (or a missing/misconfigured provider) leaves the
 /// original content untouched.
 /// </summary>
-public sealed class CavemanMiddleware : IChatMiddleware
+public sealed class CavemanMiddleware : IChatMiddleware, IStartupModelValidator
 {
     private readonly ICavemanTransformer _transformer;
     private readonly IOptions<AiProxyOptions> _options;
+    private readonly IEnumerable<IAuthProvider> _providers;
 
-    public CavemanMiddleware(ICavemanTransformer transformer, IOptions<AiProxyOptions> options)
+    public CavemanMiddleware(
+        ICavemanTransformer transformer,
+        IOptions<AiProxyOptions> options,
+        IEnumerable<IAuthProvider> providers)
     {
         _transformer = transformer;
         _options = options;
+        _providers = providers;
+    }
+
+    /// <summary>
+    /// Checks the configured compression provider and model against connected providers. If the
+    /// provider is not registered/connected, or it does not expose the configured model, Caveman
+    /// is disabled for this run (fail-safe) and a single problem is returned for a startup
+    /// warning.
+    /// </summary>
+    public IReadOnlyList<string> ValidateModels(IReadOnlyList<ProviderResolver.ProviderModels> providerModels)
+    {
+        var cfg = _options.Value.Caveman;
+        if (!cfg.Enabled)
+        {
+            return Array.Empty<string>();
+        }
+
+        var match = providerModels.FirstOrDefault(
+            pm => string.Equals(pm.Provider.Name, cfg.Provider, StringComparison.OrdinalIgnoreCase));
+
+        string? problem = null;
+        if (match.Provider is null)
+        {
+            problem =
+                $"Caveman.Provider '{cfg.Provider}' is not a connected provider " +
+                $"(run 'AiProxy connect {cfg.Provider}')";
+        }
+        else if (string.IsNullOrWhiteSpace(cfg.Model))
+        {
+            problem = "Caveman.Model is not set";
+        }
+        else if (!match.Models.Contains(cfg.Model))
+        {
+            problem = $"Caveman.Model '{cfg.Model}' is not exposed by provider '{cfg.Provider}'";
+        }
+
+        if (problem is null)
+        {
+            return Array.Empty<string>();
+        }
+
+        cfg.Enabled = false;
+        return new[] { problem };
     }
 
     public async Task InvokeAsync(ChatPipelineContext context, ChatMiddlewareDelegate next)
