@@ -40,7 +40,7 @@ internal static class TestPipeline
             return Task.CompletedTask;
         });
 
-        Assert.True(terminalReached, "Middleware must call next(context) so the pipeline continues.");
+        terminalReached.Should().BeTrue("middleware must call next(context) so the pipeline continues");
         return context.UpstreamRequest;
     }
 

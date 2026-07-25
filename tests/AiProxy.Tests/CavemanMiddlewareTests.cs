@@ -39,8 +39,8 @@ public class CavemanMiddlewareTests
         var request = TestPipeline.Request("user", LongText);
         var result = await TestPipeline.RunAsync(middleware, request);
 
-        Assert.Equal(LongText, TestPipeline.Content(result));
-        Assert.Equal(0, transformer.CompressCalls);
+        TestPipeline.Content(result).Should().Be(LongText);
+        transformer.CompressCalls.Should().Be(0);
     }
 
     [Fact]
@@ -52,8 +52,8 @@ public class CavemanMiddlewareTests
         var request = TestPipeline.Request("user", LongText);
         var result = await TestPipeline.RunAsync(middleware, request);
 
-        Assert.Equal("fox jumps. dog lazy.", TestPipeline.Content(result));
-        Assert.Equal(1, transformer.CompressCalls);
+        TestPipeline.Content(result).Should().Be("fox jumps. dog lazy.");
+        transformer.CompressCalls.Should().Be(1);
     }
 
     [Fact]
@@ -67,8 +67,8 @@ public class CavemanMiddlewareTests
         var request = TestPipeline.Request("user", "short message");
         var result = await TestPipeline.RunAsync(middleware, request);
 
-        Assert.Equal("short message", TestPipeline.Content(result));
-        Assert.Equal(0, transformer.CompressCalls);
+        TestPipeline.Content(result).Should().Be("short message");
+        transformer.CompressCalls.Should().Be(0);
     }
 
     [Fact]
@@ -80,8 +80,8 @@ public class CavemanMiddlewareTests
         var request = TestPipeline.Request("system", LongText);
         var result = await TestPipeline.RunAsync(middleware, request);
 
-        Assert.Equal(LongText, TestPipeline.Content(result));
-        Assert.Equal(0, transformer.CompressCalls);
+        TestPipeline.Content(result).Should().Be(LongText);
+        transformer.CompressCalls.Should().Be(0);
     }
 
     [Fact]
@@ -94,7 +94,7 @@ public class CavemanMiddlewareTests
         var request = TestPipeline.Request("user", LongText);
         var result = await TestPipeline.RunAsync(middleware, request);
 
-        Assert.Equal(LongText, TestPipeline.Content(result));
+        TestPipeline.Content(result).Should().Be(LongText);
     }
 
     [Fact]
@@ -106,7 +106,7 @@ public class CavemanMiddlewareTests
         var request = TestPipeline.Request("user", LongText);
         var result = await TestPipeline.RunAsync(middleware, request);
 
-        Assert.Equal(LongText, TestPipeline.Content(result));
+        TestPipeline.Content(result).Should().Be(LongText);
     }
 
     [Fact]
@@ -132,10 +132,10 @@ public class CavemanMiddlewareTests
             });
 
         var content = string.Concat(chunks.Select(c => c.ContentDelta));
-        Assert.Contains("full prose", content);
-        Assert.Equal(1, transformer.DecompressCalls);
-        Assert.Contains(chunks, c => c.FinishReason == "stop");
-        Assert.Contains(chunks, c => c.CompletionTokens == 12);
+        content.Should().Contain("full prose");
+        transformer.DecompressCalls.Should().Be(1);
+        chunks.Should().Contain(c => c.FinishReason == "stop");
+        chunks.Should().Contain(c => c.CompletionTokens == 12);
     }
 
     [Fact]
@@ -161,9 +161,9 @@ public class CavemanMiddlewareTests
             TestPipeline.Request("user", "hi"),
             new[] { toolChunk });
 
-        Assert.Equal(0, transformer.DecompressCalls);
-        Assert.Single(chunks);
-        Assert.NotNull(chunks[0].ToolCalls);
+        transformer.DecompressCalls.Should().Be(0);
+        chunks.Should().ContainSingle();
+        chunks[0].ToolCalls.Should().NotBeNull();
     }
 
     [Fact]
@@ -177,8 +177,8 @@ public class CavemanMiddlewareTests
 
         var problems = middleware.ValidateModels(Array.Empty<ProviderResolver.ProviderModels>());
 
-        Assert.Empty(problems);
-        Assert.False(options.Enabled);
+        problems.Should().BeEmpty();
+        options.Enabled.Should().BeFalse();
     }
 
     [Fact]
@@ -195,8 +195,8 @@ public class CavemanMiddlewareTests
 
         var problems = middleware.ValidateModels(providerModels);
 
-        Assert.Empty(problems);
-        Assert.True(options.Enabled);
+        problems.Should().BeEmpty();
+        options.Enabled.Should().BeTrue();
     }
 
     [Fact]
@@ -209,9 +209,9 @@ public class CavemanMiddlewareTests
 
         var problems = middleware.ValidateModels(Array.Empty<ProviderResolver.ProviderModels>());
 
-        Assert.False(options.Enabled);
-        var problem = Assert.Single(problems);
-        Assert.Contains("ollama", problem);
+        options.Enabled.Should().BeFalse();
+        var problem = problems.Should().ContainSingle().Which;
+        problem.Should().Contain("ollama");
     }
 
     [Fact]
@@ -228,9 +228,9 @@ public class CavemanMiddlewareTests
 
         var problems = middleware.ValidateModels(providerModels);
 
-        Assert.False(options.Enabled);
-        var problem = Assert.Single(problems);
-        Assert.Contains("test-model", problem);
+        options.Enabled.Should().BeFalse();
+        var problem = problems.Should().ContainSingle().Which;
+        problem.Should().Contain("test-model");
     }
 
     private sealed class StubProvider : IAuthProvider

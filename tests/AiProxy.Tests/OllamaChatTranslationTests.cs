@@ -31,10 +31,10 @@ public class OllamaChatTranslationTests
         """);
 
         var message = request.Messages![0];
-        Assert.Equal("call_abc", message.ToolCallId);
-        Assert.Equal("calc", message.ToolName);
-        Assert.Equal(0.5, request.Options!.TopP);
-        Assert.Equal(128, request.Options!.NumPredict);
+        message.ToolCallId.Should().Be("call_abc");
+        message.ToolName.Should().Be("calc");
+        request.Options!.TopP.Should().Be(0.5);
+        request.Options!.NumPredict.Should().Be(128);
     }
 
     [Fact]
@@ -46,8 +46,8 @@ public class OllamaChatTranslationTests
 
         var converted = OllamaEndpoints.ConvertMessage(request.Messages![0]);
 
-        Assert.Equal("tool", (string?)converted["role"]);
-        Assert.Equal("call_abc", (string?)converted["tool_call_id"]);
+        ((string?)converted["role"]).Should().Be("tool");
+        ((string?)converted["tool_call_id"]).Should().Be("call_abc");
     }
 
     [Fact]
@@ -70,14 +70,14 @@ public class OllamaChatTranslationTests
         var converted = OllamaEndpoints.ConvertMessage(request.Messages![0]);
         var call = converted["tool_calls"]!.AsArray()[0]!;
 
-        Assert.Equal("call_1", (string?)call["id"]);
-        Assert.Equal("function", (string?)call["type"]);
-        Assert.Equal("read_file", (string?)call["function"]!["name"]);
+        ((string?)call["id"]).Should().Be("call_1");
+        ((string?)call["type"]).Should().Be("function");
+        ((string?)call["function"]!["name"]).Should().Be("read_file");
 
         // The OpenAI wire format requires arguments as a JSON string, not an object.
         var arguments = (string?)call["function"]!["arguments"];
-        Assert.NotNull(arguments);
-        Assert.Equal("a.txt", JsonDocument.Parse(arguments).RootElement.GetProperty("path").GetString());
+        arguments.Should().NotBeNull();
+        JsonDocument.Parse(arguments).RootElement.GetProperty("path").GetString().Should().Be("a.txt");
     }
 
     [Fact]
@@ -94,7 +94,7 @@ public class OllamaChatTranslationTests
         var converted = OllamaEndpoints.ConvertMessage(request.Messages![0]);
         var id = (string?)converted["tool_calls"]!.AsArray()[0]!["id"];
 
-        Assert.False(string.IsNullOrEmpty(id));
+        string.IsNullOrEmpty(id).Should().BeFalse();
     }
 
     [Fact]
@@ -108,12 +108,12 @@ public class OllamaChatTranslationTests
         var built = accumulator.Build();
         var json = JsonSerializer.SerializeToElement(built, JsonOptions)[0];
 
-        Assert.Equal("call_1", json.GetProperty("id").GetString());
-        Assert.Equal("read_file", json.GetProperty("function").GetProperty("name").GetString());
+        json.GetProperty("id").GetString().Should().Be("call_1");
+        json.GetProperty("function").GetProperty("name").GetString().Should().Be("read_file");
         // VS Code hands arguments to the tool as its input object, so it must be parsed JSON.
         var arguments = json.GetProperty("function").GetProperty("arguments");
-        Assert.Equal(JsonValueKind.Object, arguments.ValueKind);
-        Assert.Equal("a.txt", arguments.GetProperty("path").GetString());
+        arguments.ValueKind.Should().Be(JsonValueKind.Object);
+        arguments.GetProperty("path").GetString().Should().Be("a.txt");
     }
 
     [Fact]
@@ -126,9 +126,9 @@ public class OllamaChatTranslationTests
         var built = accumulator.Build();
         var json = JsonSerializer.SerializeToElement(built, JsonOptions);
 
-        Assert.Equal(2, json.GetArrayLength());
-        Assert.Equal("first", json[0].GetProperty("function").GetProperty("name").GetString());
-        Assert.Equal("second", json[1].GetProperty("function").GetProperty("name").GetString());
+        json.GetArrayLength().Should().Be(2);
+        json[0].GetProperty("function").GetProperty("name").GetString().Should().Be("first");
+        json[1].GetProperty("function").GetProperty("name").GetString().Should().Be("second");
     }
 
     [Fact]
@@ -140,8 +140,8 @@ public class OllamaChatTranslationTests
         var json = JsonSerializer.SerializeToElement(accumulator.Build(), JsonOptions)[0];
         var arguments = json.GetProperty("function").GetProperty("arguments");
 
-        Assert.Equal(JsonValueKind.Object, arguments.ValueKind);
-        Assert.Equal(0, arguments.EnumerateObject().Count());
+        arguments.ValueKind.Should().Be(JsonValueKind.Object);
+        arguments.EnumerateObject().Count().Should().Be(0);
     }
 
     [Fact]
@@ -150,7 +150,7 @@ public class OllamaChatTranslationTests
         var accumulator = new OllamaEndpoints.ToolCallAccumulator();
         accumulator.Add(Element("""{"index":0,"function":{"arguments":"{}"}}"""));
 
-        Assert.Empty(accumulator.Build());
+        accumulator.Build().Should().BeEmpty();
     }
 
     [Fact]
@@ -163,8 +163,8 @@ public class OllamaChatTranslationTests
         var converted = OllamaEndpoints.ConvertMessage(request.Messages![0]);
         var parts = converted["content"]!.AsArray();
 
-        Assert.Equal("text", (string?)parts[0]!["type"]);
-        Assert.Equal("image_url", (string?)parts[1]!["type"]);
-        Assert.StartsWith("data:image/png;base64,", (string?)parts[1]!["image_url"]!["url"]);
+        ((string?)parts[0]!["type"]).Should().Be("text");
+        ((string?)parts[1]!["type"]).Should().Be("image_url");
+        ((string?)parts[1]!["image_url"]!["url"]).Should().StartWith("data:image/png;base64,");
     }
 }

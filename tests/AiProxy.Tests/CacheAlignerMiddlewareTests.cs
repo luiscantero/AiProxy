@@ -13,7 +13,7 @@ public class CacheAlignerMiddlewareTests
 
         var content = TestPipeline.Content(await TestPipeline.RunAsync(_middleware, request))!;
 
-        Assert.Equal("Session id: <UUID>.", content);
+        content.Should().Be("Session id: <UUID>.");
     }
 
     [Fact]
@@ -23,7 +23,7 @@ public class CacheAlignerMiddlewareTests
 
         var content = TestPipeline.Content(await TestPipeline.RunAsync(_middleware, request))!;
 
-        Assert.Equal("Now: <TIMESTAMP> done.", content);
+        content.Should().Be("Now: <TIMESTAMP> done.");
     }
 
     [Fact]
@@ -33,7 +33,7 @@ public class CacheAlignerMiddlewareTests
 
         var content = TestPipeline.Content(await TestPipeline.RunAsync(_middleware, request))!;
 
-        Assert.Equal("Today is <DATE> ok.", content);
+        content.Should().Be("Today is <DATE> ok.");
     }
 
     [Fact]
@@ -43,7 +43,7 @@ public class CacheAlignerMiddlewareTests
 
         var content = TestPipeline.Content(await TestPipeline.RunAsync(_middleware, request))!;
 
-        Assert.Equal("epoch=<EPOCH> end", content);
+        content.Should().Be("epoch=<EPOCH> end");
     }
 
     [Fact]
@@ -54,7 +54,7 @@ public class CacheAlignerMiddlewareTests
 
         var content = TestPipeline.Content(await TestPipeline.RunAsync(_middleware, request));
 
-        Assert.Equal(original, content);
+        content.Should().Be(original);
     }
 
     [Fact]
@@ -65,6 +65,6 @@ public class CacheAlignerMiddlewareTests
 
         var content = TestPipeline.Content(await TestPipeline.RunAsync(_middleware, request));
 
-        Assert.Equal(original, content);
+        content.Should().Be(original);
     }
 }

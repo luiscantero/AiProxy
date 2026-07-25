@@ -22,24 +22,24 @@ public class OpenAiCompatibleAuthProviderTests
     [Fact]
     public void Constructor_throws_when_name_missing()
     {
-        var ex = Assert.Throws<ArgumentException>(() =>
-            Create(new InMemoryTokenStore(), Config(name: "")));
-        Assert.Contains("Name", ex.Message);
+        Action act = () => Create(new InMemoryTokenStore(), Config(name: ""));
+        var ex = act.Should().Throw<ArgumentException>().Which;
+        ex.Message.Should().Contain("Name");
     }
 
     [Fact]
     public void Constructor_throws_when_base_url_missing()
     {
-        var ex = Assert.Throws<ArgumentException>(() =>
-            Create(new InMemoryTokenStore(), Config(baseUrl: "")));
-        Assert.Contains("BaseUrl", ex.Message);
+        Action act = () => Create(new InMemoryTokenStore(), Config(baseUrl: ""));
+        var ex = act.Should().Throw<ArgumentException>().Which;
+        ex.Message.Should().Contain("BaseUrl");
     }
 
     [Fact]
     public void Name_comes_from_config()
     {
         var provider = Create(new InMemoryTokenStore(), Config(name: "openrouter"));
-        Assert.Equal("openrouter", provider.Name);
+        provider.Name.Should().Be("openrouter");
     }
 
     [Fact]
@@ -49,22 +49,23 @@ public class OpenAiCompatibleAuthProviderTests
         await store.SaveAsync(new AuthState { Provider = "openai", ApiKey = "sk-stored" });
         var provider = Create(store, Config(apiKey: "sk-config"));
 
-        Assert.Equal("sk-stored", await provider.GetAccessTokenAsync());
+        (await provider.GetAccessTokenAsync()).Should().Be("sk-stored");
     }
 
     [Fact]
     public async Task GetAccessToken_falls_back_to_config_key()
     {
         var provider = Create(new InMemoryTokenStore(), Config(apiKey: "sk-config"));
-        Assert.Equal("sk-config", await provider.GetAccessTokenAsync());
+        (await provider.GetAccessTokenAsync()).Should().Be("sk-config");
     }
 
     [Fact]
     public async Task GetAccessToken_throws_when_no_key_anywhere()
     {
         var provider = Create(new InMemoryTokenStore(), Config());
-        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => provider.GetAccessTokenAsync());
-        Assert.Contains("connect openai", ex.Message);
+        Func<Task> act = () => provider.GetAccessTokenAsync();
+        var ex = (await act.Should().ThrowAsync<InvalidOperationException>()).Which;
+        ex.Message.Should().Contain("connect openai");
     }
 
     [Fact]
@@ -78,28 +79,28 @@ public class OpenAiCompatibleAuthProviderTests
         });
         var provider = Create(store, Config(models: new[] { "gpt-3.5" }));
 
-        Assert.Equal(new[] { "gpt-4o" }, await provider.GetSelectedModelsAsync());
+        (await provider.GetSelectedModelsAsync()).Should().Equal("gpt-4o");
     }
 
     [Fact]
     public async Task GetSelectedModels_falls_back_to_config()
     {
         var provider = Create(new InMemoryTokenStore(), Config(models: new[] { "gpt-4o-mini" }));
-        Assert.Equal(new[] { "gpt-4o-mini" }, await provider.GetSelectedModelsAsync());
+        (await provider.GetSelectedModelsAsync()).Should().Equal("gpt-4o-mini");
     }
 
     [Fact]
     public async Task GetSelectedModels_empty_when_nothing_configured()
     {
         var provider = Create(new InMemoryTokenStore(), Config());
-        Assert.Empty(await provider.GetSelectedModelsAsync());
+        (await provider.GetSelectedModelsAsync()).Should().BeEmpty();
     }
 
     [Fact]
     public async Task GetUpstreamApiBaseUrl_uses_config_when_no_state()
     {
         var provider = Create(new InMemoryTokenStore(), Config(baseUrl: "https://openrouter.ai/api/v1"));
-        Assert.Equal("https://openrouter.ai/api/v1", await provider.GetUpstreamApiBaseUrlAsync());
+        (await provider.GetUpstreamApiBaseUrlAsync()).Should().Be("https://openrouter.ai/api/v1");
     }
 
     [Fact]
@@ -109,14 +110,14 @@ public class OpenAiCompatibleAuthProviderTests
         await store.SaveAsync(new AuthState { Provider = "openai", UpstreamApiBaseUrl = "https://stored/v1" });
         var provider = Create(store, Config());
 
-        Assert.Equal("https://stored/v1", await provider.GetUpstreamApiBaseUrlAsync());
+        (await provider.GetUpstreamApiBaseUrlAsync()).Should().Be("https://stored/v1");
     }
 
     [Fact]
     public async Task Logout_returns_false_when_nothing_stored()
     {
         var provider = Create(new InMemoryTokenStore(), Config());
-        Assert.False(await provider.LogoutAsync());
+        (await provider.LogoutAsync()).Should().BeFalse();
     }
 
     [Fact]
@@ -126,8 +127,8 @@ public class OpenAiCompatibleAuthProviderTests
         await store.SaveAsync(new AuthState { Provider = "openai", ApiKey = "sk" });
         var provider = Create(store, Config());
 
-        Assert.True(await provider.LogoutAsync());
-        Assert.Null(await store.LoadAsync("openai"));
+        (await provider.LogoutAsync()).Should().BeTrue();
+        (await store.LoadAsync("openai")).Should().BeNull();
     }
 
     [Fact]
@@ -140,36 +141,38 @@ public class OpenAiCompatibleAuthProviderTests
         using var request = new HttpRequestMessage(HttpMethod.Post, "https://api.openai.com/v1/chat/completions");
         await provider.PrepareUpstreamRequestAsync(request);
 
-        Assert.Equal("Bearer", request.Headers.Authorization?.Scheme);
-        Assert.Equal("sk-abc", request.Headers.Authorization?.Parameter);
+        request.Headers.Authorization?.Scheme.Should().Be("Bearer");
+        request.Headers.Authorization?.Parameter.Should().Be("sk-abc");
     }
 
     [Fact]
     public void ParseSelection_star_selects_all()
     {
         var models = Models("a", "b", "c");
-        Assert.Equal(new[] { "a", "b", "c" }, OpenAiCompatibleAuthProvider.ParseSelection("*", models));
+        OpenAiCompatibleAuthProvider.ParseSelection("*", models).Should().Equal("a", "b", "c");
     }
 
     [Fact]
     public void ParseSelection_indices_map_to_ids_and_dedupe()
     {
         var models = Models("a", "b", "c");
-        Assert.Equal(new[] { "a", "c" }, OpenAiCompatibleAuthProvider.ParseSelection("1,3,1", models));
+        OpenAiCompatibleAuthProvider.ParseSelection("1,3,1", models).Should().Equal("a", "c");
     }
 
     [Fact]
     public void ParseSelection_rejects_out_of_range()
     {
         var models = Models("a", "b");
-        Assert.Throws<FormatException>(() => OpenAiCompatibleAuthProvider.ParseSelection("3", models));
+        Action act = () => OpenAiCompatibleAuthProvider.ParseSelection("3", models);
+        act.Should().Throw<FormatException>();
     }
 
     [Fact]
     public void ParseSelection_rejects_non_numeric()
     {
         var models = Models("a", "b");
-        Assert.Throws<FormatException>(() => OpenAiCompatibleAuthProvider.ParseSelection("x", models));
+        Action act = () => OpenAiCompatibleAuthProvider.ParseSelection("x", models);
+        act.Should().Throw<FormatException>();
     }
 
     private static IReadOnlyList<OpenAiCompatibleModelsClient.ModelEntry> Models(params string[] ids) =>

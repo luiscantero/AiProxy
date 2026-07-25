@@ -23,17 +23,17 @@ public class ResponsesApiTranslatorTests
 
         var result = ResponsesApiTranslator.ToResponsesRequest(request);
 
-        Assert.Equal("gpt-5.6-sol", result["model"]!.GetValue<string>());
-        Assert.Equal(256, result["max_output_tokens"]!.GetValue<int>());
-        Assert.Null(result["max_tokens"]);
-        Assert.Null(result["messages"]);
+        result["model"]!.GetValue<string>().Should().Be("gpt-5.6-sol");
+        result["max_output_tokens"]!.GetValue<int>().Should().Be(256);
+        result["max_tokens"].Should().BeNull();
+        result["messages"].Should().BeNull();
 
         var input = (JsonArray)result["input"]!;
-        Assert.Equal(2, input.Count);
-        Assert.Equal("message", input[0]!["type"]!.GetValue<string>());
-        Assert.Equal("system", input[0]!["role"]!.GetValue<string>());
-        Assert.Equal("input_text", input[0]!["content"]![0]!["type"]!.GetValue<string>());
-        Assert.Equal("be brief", input[0]!["content"]![0]!["text"]!.GetValue<string>());
+        input.Count.Should().Be(2);
+        input[0]!["type"]!.GetValue<string>().Should().Be("message");
+        input[0]!["role"]!.GetValue<string>().Should().Be("system");
+        input[0]!["content"]![0]!["type"]!.GetValue<string>().Should().Be("input_text");
+        input[0]!["content"]![0]!["text"]!.GetValue<string>().Should().Be("be brief");
     }
 
     [Fact]
@@ -51,10 +51,10 @@ public class ResponsesApiTranslatorTests
 
         var result = ResponsesApiTranslator.ToResponsesRequest(request);
 
-        Assert.Null(result["temperature"]);
-        Assert.Null(result["top_p"]);
-        Assert.Null(result["stop"]);
-        Assert.Null(result["stream_options"]);
+        result["temperature"].Should().BeNull();
+        result["top_p"].Should().BeNull();
+        result["stop"].Should().BeNull();
+        result["stream_options"].Should().BeNull();
     }
 
     [Fact]
@@ -69,7 +69,7 @@ public class ResponsesApiTranslatorTests
 
         var result = ResponsesApiTranslator.ToResponsesRequest(request);
 
-        Assert.Equal("high", result["reasoning"]!["effort"]!.GetValue<string>());
+        result["reasoning"]!["effort"]!.GetValue<string>().Should().Be("high");
     }
 
     [Fact]
@@ -97,9 +97,9 @@ public class ResponsesApiTranslatorTests
 
         var content = (JsonArray)ResponsesApiTranslator.ToResponsesRequest(request)["input"]![0]!["content"]!;
 
-        Assert.Equal("input_text", content[0]!["type"]!.GetValue<string>());
-        Assert.Equal("input_image", content[1]!["type"]!.GetValue<string>());
-        Assert.Equal("data:image/png;base64,AAAA", content[1]!["image_url"]!.GetValue<string>());
+        content[0]!["type"]!.GetValue<string>().Should().Be("input_text");
+        content[1]!["type"]!.GetValue<string>().Should().Be("input_image");
+        content[1]!["image_url"]!.GetValue<string>().Should().Be("data:image/png;base64,AAAA");
     }
 
     [Fact]
@@ -125,10 +125,10 @@ public class ResponsesApiTranslatorTests
 
         var tool = ResponsesApiTranslator.ToResponsesRequest(request)["tools"]![0]!;
 
-        Assert.Equal("function", tool["type"]!.GetValue<string>());
-        Assert.Equal("get_weather", tool["name"]!.GetValue<string>());
-        Assert.Equal("Look up weather", tool["description"]!.GetValue<string>());
-        Assert.Null(tool["function"]);
+        tool["type"]!.GetValue<string>().Should().Be("function");
+        tool["name"]!.GetValue<string>().Should().Be("get_weather");
+        tool["description"]!.GetValue<string>().Should().Be("Look up weather");
+        tool["function"].Should().BeNull();
     }
 
     [Fact]
@@ -167,17 +167,17 @@ public class ResponsesApiTranslatorTests
 
         var input = (JsonArray)ResponsesApiTranslator.ToResponsesRequest(request)["input"]!;
 
-        Assert.Equal(3, input.Count);
-        Assert.Equal("message", input[0]!["type"]!.GetValue<string>());
-        Assert.Equal("output_text", input[0]!["content"]![0]!["type"]!.GetValue<string>());
+        input.Count.Should().Be(3);
+        input[0]!["type"]!.GetValue<string>().Should().Be("message");
+        input[0]!["content"]![0]!["type"]!.GetValue<string>().Should().Be("output_text");
 
-        Assert.Equal("function_call", input[1]!["type"]!.GetValue<string>());
-        Assert.Equal("call_1", input[1]!["call_id"]!.GetValue<string>());
-        Assert.Equal("get_weather", input[1]!["name"]!.GetValue<string>());
+        input[1]!["type"]!.GetValue<string>().Should().Be("function_call");
+        input[1]!["call_id"]!.GetValue<string>().Should().Be("call_1");
+        input[1]!["name"]!.GetValue<string>().Should().Be("get_weather");
 
-        Assert.Equal("function_call_output", input[2]!["type"]!.GetValue<string>());
-        Assert.Equal("call_1", input[2]!["call_id"]!.GetValue<string>());
-        Assert.Equal("sunny", input[2]!["output"]!.GetValue<string>());
+        input[2]!["type"]!.GetValue<string>().Should().Be("function_call_output");
+        input[2]!["call_id"]!.GetValue<string>().Should().Be("call_1");
+        input[2]!["output"]!.GetValue<string>().Should().Be("sunny");
     }
 
     [Fact]
@@ -205,8 +205,8 @@ public class ResponsesApiTranslatorTests
 
         var input = (JsonArray)ResponsesApiTranslator.ToResponsesRequest(request)["input"]!;
 
-        Assert.Single(input);
-        Assert.Equal("function_call", input[0]!["type"]!.GetValue<string>());
+        input.Should().ContainSingle();
+        input[0]!["type"]!.GetValue<string>().Should().Be("function_call");
     }
 
     [Fact]
@@ -215,17 +215,17 @@ public class ResponsesApiTranslatorTests
         var chunk = ResponsesApiTranslator.ParseStreamEvent(
             """{"type":"response.output_text.delta","delta":"Hello"}""");
 
-        Assert.NotNull(chunk);
-        Assert.Equal("Hello", chunk!.ContentDelta);
+        chunk.Should().NotBeNull();
+        chunk!.ContentDelta.Should().Be("Hello");
     }
 
     [Fact]
     public void Ignores_events_with_nothing_to_deliver()
     {
-        Assert.Null(ResponsesApiTranslator.ParseStreamEvent(
-            """{"type":"response.reasoning_summary_text.delta","delta":"thinking"}"""));
-        Assert.Null(ResponsesApiTranslator.ParseStreamEvent(
-            """{"type":"response.created","response":{"id":"resp_1"}}"""));
+        ResponsesApiTranslator.ParseStreamEvent(
+            """{"type":"response.reasoning_summary_text.delta","delta":"thinking"}""").Should().BeNull();
+        ResponsesApiTranslator.ParseStreamEvent(
+            """{"type":"response.created","response":{"id":"resp_1"}}""").Should().BeNull();
     }
 
     [Fact]
@@ -237,20 +237,20 @@ public class ResponsesApiTranslatorTests
              "item":{"type":"function_call","call_id":"call_9","name":"get_weather","arguments":"{\"city\":\"Berlin\"}"}}
             """);
 
-        Assert.NotNull(chunk);
+        chunk.Should().NotBeNull();
         var call = chunk!.ToolCalls!.Single();
-        Assert.Equal(2, call.GetProperty("index").GetInt32());
-        Assert.Equal("call_9", call.GetProperty("id").GetString());
-        Assert.Equal("function", call.GetProperty("type").GetString());
-        Assert.Equal("get_weather", call.GetProperty("function").GetProperty("name").GetString());
-        Assert.Equal("{\"city\":\"Berlin\"}", call.GetProperty("function").GetProperty("arguments").GetString());
+        call.GetProperty("index").GetInt32().Should().Be(2);
+        call.GetProperty("id").GetString().Should().Be("call_9");
+        call.GetProperty("type").GetString().Should().Be("function");
+        call.GetProperty("function").GetProperty("name").GetString().Should().Be("get_weather");
+        call.GetProperty("function").GetProperty("arguments").GetString().Should().Be("{\"city\":\"Berlin\"}");
     }
 
     [Fact]
     public void Ignores_non_function_item_done_events()
     {
-        Assert.Null(ResponsesApiTranslator.ParseStreamEvent(
-            """{"type":"response.output_item.done","output_index":0,"item":{"type":"message","role":"assistant"}}"""));
+        ResponsesApiTranslator.ParseStreamEvent(
+            """{"type":"response.output_item.done","output_index":0,"item":{"type":"message","role":"assistant"}}""").Should().BeNull();
     }
 
     [Fact]
@@ -262,10 +262,10 @@ public class ResponsesApiTranslatorTests
              "output":[{"type":"message"}],"usage":{"input_tokens":11,"output_tokens":7}}}
             """);
 
-        Assert.NotNull(chunk);
-        Assert.Equal("stop", chunk!.FinishReason);
-        Assert.Equal(11, chunk.PromptTokens);
-        Assert.Equal(7, chunk.CompletionTokens);
+        chunk.Should().NotBeNull();
+        chunk!.FinishReason.Should().Be("stop");
+        chunk.PromptTokens.Should().Be(11);
+        chunk.CompletionTokens.Should().Be(7);
     }
 
     [Fact]
@@ -277,7 +277,7 @@ public class ResponsesApiTranslatorTests
              "output":[{"type":"function_call","call_id":"c","name":"f","arguments":"{}"}]}}
             """);
 
-        Assert.Equal("tool_calls", chunk!.FinishReason);
+        chunk!.FinishReason.Should().Be("tool_calls");
     }
 
     [Fact]
@@ -286,7 +286,7 @@ public class ResponsesApiTranslatorTests
         var chunk = ResponsesApiTranslator.ParseStreamEvent(
             """{"type":"response.incomplete","response":{"status":"incomplete","output":[]}}""");
 
-        Assert.Equal("length", chunk!.FinishReason);
+        chunk!.FinishReason.Should().Be("length");
     }
 
     [Fact]
@@ -305,10 +305,10 @@ public class ResponsesApiTranslatorTests
 
         var chunk = ResponsesApiTranslator.ParseNonStreamingResponse(doc.RootElement);
 
-        Assert.Equal("Hi there", chunk.ContentDelta);
-        Assert.Equal("tool_calls", chunk.FinishReason);
-        Assert.Equal(5, chunk.PromptTokens);
-        Assert.Equal(2, chunk.CompletionTokens);
-        Assert.Equal("call_3", chunk.ToolCalls!.Single().GetProperty("id").GetString());
+        chunk.ContentDelta.Should().Be("Hi there");
+        chunk.FinishReason.Should().Be("tool_calls");
+        chunk.PromptTokens.Should().Be(5);
+        chunk.CompletionTokens.Should().Be(2);
+        chunk.ToolCalls!.Single().GetProperty("id").GetString().Should().Be("call_3");
     }
 }
