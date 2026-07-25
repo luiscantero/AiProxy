@@ -43,8 +43,8 @@ public class ModelFallbackMiddlewareTests
 
         await middleware.InvokeAsync(context, _ => { calls++; return Task.CompletedTask; });
 
-        Assert.Equal(1, calls);
-        Assert.Equal("primary", context.Model);
+        calls.Should().Be(1);
+        context.Model.Should().Be("primary");
     }
 
     [Fact]
@@ -72,10 +72,10 @@ public class ModelFallbackMiddlewareTests
             return Task.CompletedTask;
         });
 
-        Assert.Equal(new[] { "primary", "backup" }, models);
-        Assert.Equal("backup", context.Model);
-        Assert.Same(providers[1], context.Provider);
-        Assert.Equal("backup", context.UpstreamRequest["model"]!.GetValue<string>());
+        models.Should().Equal("primary", "backup");
+        context.Model.Should().Be("backup");
+        context.Provider.Should().BeSameAs(providers[1]);
+        context.UpstreamRequest["model"]!.GetValue<string>().Should().Be("backup");
     }
 
     [Fact]
@@ -92,15 +92,15 @@ public class ModelFallbackMiddlewareTests
         var context = Context("primary", providers[0]);
         var calls = 0;
 
-        var ex = await Assert.ThrowsAsync<UpstreamException>(() =>
-            middleware.InvokeAsync(context, _ =>
-            {
-                calls++;
-                throw new UpstreamException(400, "bad request");
-            }));
+        Func<Task> act = () => middleware.InvokeAsync(context, _ =>
+        {
+            calls++;
+            throw new UpstreamException(400, "bad request");
+        });
+        var ex = (await act.Should().ThrowAsync<UpstreamException>()).Which;
 
-        Assert.Equal(400, ex.StatusCode);
-        Assert.Equal(1, calls);
+        ex.StatusCode.Should().Be(400);
+        calls.Should().Be(1);
     }
 
     [Fact]
@@ -116,10 +116,11 @@ public class ModelFallbackMiddlewareTests
 
         var context = Context("primary", providers[0]);
 
-        var ex = await Assert.ThrowsAsync<UpstreamException>(() =>
-            middleware.InvokeAsync(context, _ => throw new UpstreamException(429, "rate limited")));
+        Func<Task> act = () =>
+            middleware.InvokeAsync(context, _ => throw new UpstreamException(429, "rate limited"));
+        var ex = (await act.Should().ThrowAsync<UpstreamException>()).Which;
 
-        Assert.Equal(429, ex.StatusCode);
+        ex.StatusCode.Should().Be(429);
     }
 
     [Fact]
@@ -148,8 +149,8 @@ public class ModelFallbackMiddlewareTests
             return Task.CompletedTask;
         });
 
-        Assert.Equal(new[] { "primary", "third" }, models);
-        Assert.Equal("third", context.Model);
+        models.Should().Equal("primary", "third");
+        context.Model.Should().Be("third");
     }
 
     [Fact]
@@ -165,8 +166,8 @@ public class ModelFallbackMiddlewareTests
 
         var problems = middleware.ValidateModels(Array.Empty<ProviderResolver.ProviderModels>());
 
-        Assert.Empty(problems);
-        Assert.False(fallback.Enabled);
+        problems.Should().BeEmpty();
+        fallback.Enabled.Should().BeFalse();
     }
 
     [Fact]
@@ -187,8 +188,8 @@ public class ModelFallbackMiddlewareTests
 
         var problems = middleware.ValidateModels(providerModels);
 
-        Assert.Empty(problems);
-        Assert.True(fallback.Enabled);
+        problems.Should().BeEmpty();
+        fallback.Enabled.Should().BeTrue();
     }
 
     [Fact]
@@ -208,9 +209,9 @@ public class ModelFallbackMiddlewareTests
 
         var problems = middleware.ValidateModels(providerModels);
 
-        Assert.False(fallback.Enabled);
-        var problem = Assert.Single(problems);
-        Assert.Contains("missing-model", problem);
+        fallback.Enabled.Should().BeFalse();
+        var problem = problems.Should().ContainSingle().Which;
+        problem.Should().Contain("missing-model");
     }
 
     private sealed class StubProvider : IAuthProvider

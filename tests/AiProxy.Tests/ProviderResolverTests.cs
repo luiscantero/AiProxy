@@ -16,14 +16,14 @@ public class ProviderResolverTests
 
         var resolved = await ProviderResolver.ResolveForModelAsync(providers, "claude-3.5", default);
 
-        Assert.Same(b, resolved);
+        resolved.Should().BeSameAs(b);
     }
 
     [Fact]
     public async Task ResolveForModel_returns_null_when_unknown()
     {
         var providers = new IAuthProvider[] { new StubProvider("a", "gpt-4o") };
-        Assert.Null(await ProviderResolver.ResolveForModelAsync(providers, "missing", default));
+        (await ProviderResolver.ResolveForModelAsync(providers, "missing", default)).Should().BeNull();
     }
 
     [Fact]
@@ -34,7 +34,7 @@ public class ProviderResolverTests
 
         var resolved = await ProviderResolver.ResolveForModelAsync(new IAuthProvider[] { a, b }, "shared", default);
 
-        Assert.Same(a, resolved);
+        resolved.Should().BeSameAs(a);
     }
 
     [Fact]
@@ -46,11 +46,11 @@ public class ProviderResolverTests
 
         var all = await ProviderResolver.ListAllAsync(new IAuthProvider[] { a, empty, b }, default);
 
-        Assert.Equal(2, all.Count);
-        Assert.Equal("a", all[0].Provider.Name);
-        Assert.Equal(new[] { "m1", "m2" }, all[0].Models);
-        Assert.Equal("b", all[1].Provider.Name);
-        Assert.Equal(new[] { "m3" }, all[1].Models);
+        all.Count.Should().Be(2);
+        all[0].Provider.Name.Should().Be("a");
+        all[0].Models.Should().Equal("m1", "m2");
+        all[1].Provider.Name.Should().Be("b");
+        all[1].Models.Should().Equal("m3");
     }
 
     [Fact]
@@ -61,8 +61,8 @@ public class ProviderResolverTests
         using var request = new HttpRequestMessage(HttpMethod.Post, "https://example/chat/completions");
         await provider.PrepareUpstreamRequestAsync(request);
 
-        Assert.Equal("Bearer", request.Headers.Authorization?.Scheme);
-        Assert.Equal("tok-123", request.Headers.Authorization?.Parameter);
+        request.Headers.Authorization?.Scheme.Should().Be("Bearer");
+        request.Headers.Authorization?.Parameter.Should().Be("tok-123");
     }
 
     /// <summary>Minimal provider whose model list and token are configurable for routing tests.</summary>

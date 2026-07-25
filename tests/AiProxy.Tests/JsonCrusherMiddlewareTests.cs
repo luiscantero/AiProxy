@@ -16,10 +16,10 @@ public class JsonCrusherMiddlewareTests
         var result = await TestPipeline.RunAsync(_middleware, request);
 
         var content = TestPipeline.Content(result)!;
-        Assert.Contains("{\"name\":\"ada\",\"age\":36}", content);
-        Assert.Contains("Here is the payload:", content);
-        Assert.Contains("Thanks", content);
-        Assert.True(content.Length < pretty.Length);
+        content.Should().Contain("{\"name\":\"ada\",\"age\":36}");
+        content.Should().Contain("Here is the payload:");
+        content.Should().Contain("Thanks");
+        (content.Length < pretty.Length).Should().BeTrue();
     }
 
     [Fact]
@@ -33,10 +33,10 @@ public class JsonCrusherMiddlewareTests
         var start = content.IndexOf('[');
         var json = content[start..];
         var parsed = JsonNode.Parse(json) as JsonArray;
-        Assert.NotNull(parsed);
-        Assert.Equal(2, parsed!.Count);
-        Assert.Equal(1, parsed[0]!["id"]!.GetValue<int>());
-        Assert.Equal(2, parsed[1]!["id"]!.GetValue<int>());
+        parsed.Should().NotBeNull();
+        parsed!.Count.Should().Be(2);
+        parsed[0]!["id"]!.GetValue<int>().Should().Be(1);
+        parsed[1]!["id"]!.GetValue<int>().Should().Be(2);
     }
 
     [Fact]
@@ -47,7 +47,7 @@ public class JsonCrusherMiddlewareTests
 
         var content = TestPipeline.Content(await TestPipeline.RunAsync(_middleware, request));
 
-        Assert.Equal(text, content);
+        content.Should().Be(text);
     }
 
     [Fact]
@@ -60,7 +60,7 @@ public class JsonCrusherMiddlewareTests
         var content = TestPipeline.Content(await TestPipeline.RunAsync(_middleware, request))!;
 
         var parsed = JsonNode.Parse(content)!;
-        Assert.Equal("hello {name}", parsed["template"]!.GetValue<string>());
+        parsed["template"]!.GetValue<string>().Should().Be("hello {name}");
     }
 
     [Fact]
@@ -89,7 +89,7 @@ public class JsonCrusherMiddlewareTests
         var result = await TestPipeline.RunAsync(_middleware, request);
 
         var text = result["messages"]![0]!["content"]![0]!["text"]!.GetValue<string>();
-        Assert.Contains("{\"a\":1,\"b\":2}", text);
+        text.Should().Contain("{\"a\":1,\"b\":2}");
     }
 
     [Fact]
@@ -99,6 +99,6 @@ public class JsonCrusherMiddlewareTests
 
         var result = await TestPipeline.RunAsync(_middleware, request);
 
-        Assert.Null(result["messages"]);
+        result["messages"].Should().BeNull();
     }
 }

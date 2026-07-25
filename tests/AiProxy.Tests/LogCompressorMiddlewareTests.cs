@@ -19,8 +19,8 @@ public class LogCompressorMiddlewareTests
 
         var content = TestPipeline.Content(await TestPipeline.RunAsync(_middleware, request))!;
 
-        Assert.Contains("(×5 identical lines)", content);
-        Assert.True(content.Length < log.Length);
+        content.Should().Contain("(×5 identical lines)");
+        (content.Length < log.Length).Should().BeTrue();
     }
 
     [Fact]
@@ -37,8 +37,8 @@ public class LogCompressorMiddlewareTests
 
         var content = TestPipeline.Content(await TestPipeline.RunAsync(_middleware, request))!;
 
-        Assert.Contains("ERROR NullReferenceException thrown", content);
-        Assert.Contains("at MyApp.Service.DoWork()", content);
+        content.Should().Contain("ERROR NullReferenceException thrown");
+        content.Should().Contain("at MyApp.Service.DoWork()");
     }
 
     [Fact]
@@ -52,8 +52,8 @@ public class LogCompressorMiddlewareTests
 
         var content = TestPipeline.Content(await TestPipeline.RunAsync(_middleware, request))!;
 
-        Assert.Contains("low-severity log lines", content);
-        Assert.True(content.Length < log.Length);
+        content.Should().Contain("low-severity log lines");
+        (content.Length < log.Length).Should().BeTrue();
     }
 
     [Fact]
@@ -66,7 +66,7 @@ public class LogCompressorMiddlewareTests
 
         var content = TestPipeline.Content(await TestPipeline.RunAsync(_middleware, request));
 
-        Assert.Equal(log, content);
+        content.Should().Be(log);
     }
 
     [Fact]
@@ -82,6 +82,6 @@ public class LogCompressorMiddlewareTests
 
         var content = TestPipeline.Content(await TestPipeline.RunAsync(_middleware, request));
 
-        Assert.Equal(prose, content);
+        content.Should().Be(prose);
     }
 }

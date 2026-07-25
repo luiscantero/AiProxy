@@ -57,9 +57,9 @@ public class GearboxMiddlewareTests
 
         await middleware.InvokeAsync(context, _ => { calls++; return Task.CompletedTask; });
 
-        Assert.Equal(1, calls);
-        Assert.Equal("sonnet", context.Model);
-        Assert.Equal("sonnet", context.UpstreamRequest["model"]!.GetValue<string>());
+        calls.Should().Be(1);
+        context.Model.Should().Be("sonnet");
+        context.UpstreamRequest["model"]!.GetValue<string>().Should().Be("sonnet");
     }
 
     [Fact]
@@ -77,8 +77,8 @@ public class GearboxMiddlewareTests
 
         await middleware.InvokeAsync(context, _ => Task.CompletedTask);
 
-        Assert.True(state.IsNeutral);
-        Assert.Equal("sonnet", context.Model);
+        state.IsNeutral.Should().BeTrue();
+        context.Model.Should().Be("sonnet");
     }
 
     [Fact]
@@ -98,9 +98,9 @@ public class GearboxMiddlewareTests
 
         await middleware.InvokeAsync(context, _ => Task.CompletedTask);
 
-        Assert.Equal("opus", context.Model);
-        Assert.Same(opus, context.Provider);
-        Assert.Equal("opus", context.UpstreamRequest["model"]!.GetValue<string>());
+        context.Model.Should().Be("opus");
+        context.Provider.Should().BeSameAs(opus);
+        context.UpstreamRequest["model"]!.GetValue<string>().Should().Be("opus");
     }
 
     [Fact]
@@ -118,7 +118,7 @@ public class GearboxMiddlewareTests
 
         await middleware.InvokeAsync(context, _ => Task.CompletedTask);
 
-        Assert.Equal("sonnet", context.Model);
+        context.Model.Should().Be("sonnet");
     }
 
     [Fact]
@@ -138,9 +138,9 @@ public class GearboxMiddlewareTests
 
         await middleware.InvokeAsync(context, _ => Task.CompletedTask);
 
-        Assert.Equal("sonnet", context.Model);
-        Assert.Same(sonnet, context.Provider);
-        Assert.Equal("sonnet", context.UpstreamRequest["model"]!.GetValue<string>());
+        context.Model.Should().Be("sonnet");
+        context.Provider.Should().BeSameAs(sonnet);
+        context.UpstreamRequest["model"]!.GetValue<string>().Should().Be("sonnet");
     }
 
     [Fact]
@@ -160,9 +160,9 @@ public class GearboxMiddlewareTests
 
         await middleware.InvokeAsync(context, _ => { reached = true; return Task.CompletedTask; });
 
-        Assert.True(reached);
-        Assert.Equal("opus", context.Model);
-        Assert.Same(opus, context.Provider);
+        reached.Should().BeTrue();
+        context.Model.Should().Be("opus");
+        context.Provider.Should().BeSameAs(opus);
     }
 
     [Fact]
@@ -177,8 +177,8 @@ public class GearboxMiddlewareTests
 
         var problems = middleware.ValidateModels(Array.Empty<ProviderResolver.ProviderModels>());
 
-        Assert.Empty(problems);
-        Assert.False(gearbox.Enabled);
+        problems.Should().BeEmpty();
+        gearbox.Enabled.Should().BeFalse();
     }
 
     [Fact]
@@ -201,8 +201,8 @@ public class GearboxMiddlewareTests
 
         var problems = middleware.ValidateModels(providerModels);
 
-        Assert.Empty(problems);
-        Assert.True(gearbox.Enabled);
+        problems.Should().BeEmpty();
+        gearbox.Enabled.Should().BeTrue();
     }
 
     [Fact]
@@ -221,10 +221,10 @@ public class GearboxMiddlewareTests
 
         var problems = middleware.ValidateModels(providerModels);
 
-        Assert.False(gearbox.Enabled);
-        var problem = Assert.Single(problems);
-        Assert.Contains("gpt-5.6-luna", problem);
-        Assert.Contains("Haiku", problem);
+        gearbox.Enabled.Should().BeFalse();
+        var problem = problems.Should().ContainSingle().Which;
+        problem.Should().Contain("gpt-5.6-luna");
+        problem.Should().Contain("Haiku");
     }
 
     private sealed class StubProvider : IAuthProvider

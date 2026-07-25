@@ -42,7 +42,7 @@ public class PixelPressMiddlewareTests
         var request = TestPipeline.Request("user", LongText);
         var result = await TestPipeline.RunAsync(middleware, request);
 
-        Assert.Equal(LongText, TestPipeline.Content(result));
+        TestPipeline.Content(result).Should().Be(LongText);
     }
 
     [Fact]
@@ -54,19 +54,19 @@ public class PixelPressMiddlewareTests
         var result = await TestPipeline.RunAsync(middleware, request);
 
         var imagePart = MessageContentImagePart(result);
-        Assert.NotNull(imagePart);
+        imagePart.Should().NotBeNull();
 
         var url = imagePart!["image_url"]!["url"]!.GetValue<string>();
         const string prefix = "data:image/png;base64,";
-        Assert.StartsWith(prefix, url);
+        url.Should().StartWith(prefix);
 
         // The decoded payload must be a real PNG (magic bytes 89 50 4E 47).
         var bytes = Convert.FromBase64String(url[prefix.Length..]);
-        Assert.True(bytes.Length > 8);
-        Assert.Equal(0x89, bytes[0]);
-        Assert.Equal(0x50, bytes[1]);
-        Assert.Equal(0x4E, bytes[2]);
-        Assert.Equal(0x47, bytes[3]);
+        (bytes.Length > 8).Should().BeTrue();
+        bytes[0].Should().Be(0x89);
+        bytes[1].Should().Be(0x50);
+        bytes[2].Should().Be(0x4E);
+        bytes[3].Should().Be(0x47);
     }
 
     [Fact]
@@ -78,10 +78,10 @@ public class PixelPressMiddlewareTests
         var result = await TestPipeline.RunAsync(middleware, request);
 
         var parts = (result["messages"] as JsonArray)?[0]?["content"] as JsonArray;
-        Assert.NotNull(parts);
+        parts.Should().NotBeNull();
         var firstText = parts![0] as JsonObject;
-        Assert.Equal("text", firstText!["type"]!.GetValue<string>());
-        Assert.Contains("rendered as pixels", firstText["text"]!.GetValue<string>());
+        firstText!["type"]!.GetValue<string>().Should().Be("text");
+        firstText["text"]!.GetValue<string>().Should().Contain("rendered as pixels");
     }
 
     [Fact]
@@ -95,8 +95,8 @@ public class PixelPressMiddlewareTests
         var result = await TestPipeline.RunAsync(middleware, request);
 
         var parts = (result["messages"] as JsonArray)?[0]?["content"] as JsonArray;
-        Assert.NotNull(parts);
-        Assert.All(parts!, p => Assert.Equal("image_url", (p as JsonObject)!["type"]!.GetValue<string>()));
+        parts.Should().NotBeNull();
+        parts!.Should().AllSatisfy(p => ((p as JsonObject)!["type"]!.GetValue<string>()).Should().Be("image_url"));
     }
 
     [Fact]
@@ -109,7 +109,7 @@ public class PixelPressMiddlewareTests
         var request = TestPipeline.Request("user", LongText);
         var result = await TestPipeline.RunAsync(middleware, request);
 
-        Assert.Equal(LongText, TestPipeline.Content(result));
+        TestPipeline.Content(result).Should().Be(LongText);
     }
 
     [Fact]
@@ -122,7 +122,7 @@ public class PixelPressMiddlewareTests
         var request = TestPipeline.Request("system", LongText);
         var result = await TestPipeline.RunAsync(middleware, request);
 
-        Assert.Equal(LongText, TestPipeline.Content(result));
+        TestPipeline.Content(result).Should().Be(LongText);
     }
 
     [Fact]
@@ -149,10 +149,10 @@ public class PixelPressMiddlewareTests
         var result = await TestPipeline.RunAsync(middleware, request);
 
         var parts = (result["messages"] as JsonArray)?[0]?["content"] as JsonArray;
-        Assert.NotNull(parts);
-        Assert.Contains(parts!.OfType<JsonObject>(), p => p["type"]?.GetValue<string>() == "image_url");
+        parts.Should().NotBeNull();
+        parts!.OfType<JsonObject>().Should().Contain(p => p["type"]!.GetValue<string>() == "image_url");
         // The short leading note stays as text.
-        Assert.Contains(parts!.OfType<JsonObject>(),
-            p => p["type"]?.GetValue<string>() == "text" && p["text"]?.GetValue<string>() == "short leading note");
+        parts!.OfType<JsonObject>().Should().Contain(
+            p => p["type"]!.GetValue<string>() == "text" && p["text"]!.GetValue<string>() == "short leading note");
     }
 }
