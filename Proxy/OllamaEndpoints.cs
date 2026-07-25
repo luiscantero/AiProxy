@@ -117,10 +117,14 @@ public static class OllamaEndpoints
         // Ollama clients read num_ctx from there to size the token gauge.
         var parametersText = contextLength > 0 ? $"num_ctx {contextLength}\n" : "";
 
-        // VS Code gates image attachments on the "vision" capability reported here, so a
-        // vision-capable upstream model must advertise it or pasted images are rejected
-        // client-side before the request ever reaches us.
-        var capabilities = new List<string> { "completion", "tools" };
+        // VS Code reads exactly two capability strings from here: "tools" (tool calling)
+        // and "vision" (image attachments). Advertising one the model lacks turns a clean
+        // client-side block into an upstream 400 mid-request.
+        var capabilities = new List<string> { "completion" };
+        if (info?.SupportsToolCalls != false)
+        {
+            capabilities.Add("tools");
+        }
         if (info?.SupportsVision == true)
         {
             capabilities.Add("vision");

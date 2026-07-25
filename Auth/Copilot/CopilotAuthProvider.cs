@@ -160,7 +160,8 @@ public sealed class CopilotAuthProvider : IAuthProvider
                 Family = m.Capabilities?.Family,
                 MaxContextWindowTokens = m.Capabilities?.Limits?.MaxContextWindowTokens,
                 MaxOutputTokens = m.Capabilities?.Limits?.MaxOutputTokens,
-                SupportsVision = m.Capabilities?.Supports?.Vision
+                SupportsVision = m.Capabilities?.Supports?.Vision,
+                SupportsToolCalls = m.Capabilities?.Supports?.ToolCalls
             },
             StringComparer.Ordinal);
 

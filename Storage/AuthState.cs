@@ -41,4 +41,11 @@ public sealed record ModelInfo
     /// Null means the provider did not report it.
     /// </summary>
     public bool? SupportsVision { get; init; }
+
+    /// <summary>
+    /// Whether the upstream model accepts tool definitions. Surfaced by the Ollama
+    /// /api/show endpoint as the "tools" capability. Null means the provider did not
+    /// report it, in which case we assume tools are supported.
+    /// </summary>
+    public bool? SupportsToolCalls { get; init; }
 }
