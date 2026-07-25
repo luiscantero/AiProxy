@@ -117,6 +117,15 @@ public static class OllamaEndpoints
         // Ollama clients read num_ctx from there to size the token gauge.
         var parametersText = contextLength > 0 ? $"num_ctx {contextLength}\n" : "";
 
+        // VS Code gates image attachments on the "vision" capability reported here, so a
+        // vision-capable upstream model must advertise it or pasted images are rejected
+        // client-side before the request ever reaches us.
+        var capabilities = new List<string> { "completion", "tools" };
+        if (info?.SupportsVision == true)
+        {
+            capabilities.Add("vision");
+        }
+
         return Results.Json(new
         {
             license = "",
@@ -133,7 +142,7 @@ public static class OllamaEndpoints
                 quantization_level = ""
             },
             model_info = modelInfo,
-            capabilities = new[] { "completion", "tools" }
+            capabilities
         });
     }
 
@@ -264,12 +273,36 @@ public static class OllamaEndpoints
 
     private static JsonObject ConvertMessage(OllamaMessage m)
     {
-        // Pass content through; ignore images for now (Copilot won't accept them anyway).
         var obj = new JsonObject
         {
-            ["role"] = m.Role,
-            ["content"] = m.Content ?? ""
+            ["role"] = m.Role
         };
+
+        // Ollama carries attachments in a separate base64 'images' array; the OpenAI wire
+        // format expects them as image_url content parts alongside the text.
+        if (m.Images is { Count: > 0 } images)
+        {
+            var parts = new JsonArray();
+            if (!string.IsNullOrEmpty(m.Content))
+            {
+                parts.Add(new JsonObject { ["type"] = "text", ["text"] = m.Content });
+            }
+            foreach (var image in images)
+            {
+                if (string.IsNullOrWhiteSpace(image)) continue;
+                parts.Add(new JsonObject
+                {
+                    ["type"] = "image_url",
+                    ["image_url"] = new JsonObject { ["url"] = ToDataUrl(image) }
+                });
+            }
+            obj["content"] = parts;
+        }
+        else
+        {
+            obj["content"] = m.Content ?? "";
+        }
+
         if (m.ToolCalls is { Count: > 0 } tc)
         {
             var toolArray = new JsonArray();
@@ -278,6 +311,50 @@ public static class OllamaEndpoints
         }
         if (!string.IsNullOrEmpty(m.Name)) obj["name"] = m.Name;
         return obj;
+    }
+
+    /// <summary>
+    /// Ollama sends bare base64 payloads with no media type, so sniff the magic bytes to
+    /// build the data URL the OpenAI image_url part requires.
+    /// </summary>
+    private static string ToDataUrl(string image)
+    {
+        var value = image.Trim();
+        if (value.StartsWith("data:", StringComparison.OrdinalIgnoreCase))
+        {
+            return value;
+        }
+
+        var mediaType = "image/png";
+        Span<byte> header = stackalloc byte[12];
+        // Base64 decodes 4 chars -> 3 bytes; 16 chars is enough for the longest signature.
+        var prefix = value.Length > 16 ? value[..16] : value;
+        if (Convert.TryFromBase64String(PadBase64(prefix), header, out var written))
+        {
+            var bytes = header[..written];
+            if (bytes.Length >= 3 && bytes[0] == 0xFF && bytes[1] == 0xD8 && bytes[2] == 0xFF)
+            {
+                mediaType = "image/jpeg";
+            }
+            else if (bytes.Length >= 3 && bytes[0] == (byte)'G' && bytes[1] == (byte)'I' && bytes[2] == (byte)'F')
+            {
+                mediaType = "image/gif";
+            }
+            else if (bytes.Length >= 12
+                     && bytes[0] == (byte)'R' && bytes[1] == (byte)'I' && bytes[2] == (byte)'F' && bytes[3] == (byte)'F'
+                     && bytes[8] == (byte)'W' && bytes[9] == (byte)'E' && bytes[10] == (byte)'B' && bytes[11] == (byte)'P')
+            {
+                mediaType = "image/webp";
+            }
+        }
+
+        return $"data:{mediaType};base64,{value}";
+    }
+
+    private static string PadBase64(string value)
+    {
+        var usable = value.Length - (value.Length % 4);
+        return value[..usable];
     }
 
     private static async Task WriteNdjsonStreamAsync(

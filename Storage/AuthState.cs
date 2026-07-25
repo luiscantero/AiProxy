@@ -34,4 +34,11 @@ public sealed record ModelInfo
     public string? Family { get; init; }
     public int? MaxContextWindowTokens { get; init; }
     public int? MaxOutputTokens { get; init; }
+
+    /// <summary>
+    /// Whether the upstream model accepts image content parts. Surfaced by the Ollama
+    /// /api/show endpoint as the "vision" capability so VS Code allows image attachments.
+    /// Null means the provider did not report it.
+    /// </summary>
+    public bool? SupportsVision { get; init; }
 }

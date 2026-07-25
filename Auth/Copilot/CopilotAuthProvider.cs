@@ -159,7 +159,8 @@ public sealed class CopilotAuthProvider : IAuthProvider
                 Name = m.Name,
                 Family = m.Capabilities?.Family,
                 MaxContextWindowTokens = m.Capabilities?.Limits?.MaxContextWindowTokens,
-                MaxOutputTokens = m.Capabilities?.Limits?.MaxOutputTokens
+                MaxOutputTokens = m.Capabilities?.Limits?.MaxOutputTokens,
+                SupportsVision = m.Capabilities?.Supports?.Vision
             },
             StringComparer.Ordinal);
 
@@ -262,6 +263,8 @@ public sealed class CopilotAuthProvider : IAuthProvider
         request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
         CopilotHeaders.Apply(request);
         request.Headers.TryAddWithoutValidation("OpenAI-Intent", "conversation-panel");
+        // Copilot rejects image content parts unless the client opts in to vision requests.
+        request.Headers.TryAddWithoutValidation("Copilot-Vision-Request", "true");
     }
 
     private static IReadOnlyList<string> ParseSelection(string input, IReadOnlyList<CopilotModelsClient.ModelEntry> models)
