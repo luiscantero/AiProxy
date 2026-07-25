@@ -1,6 +1,9 @@
 using System.Text.Json.Nodes;
+using AiProxy.Auth;
 using AiProxy.Pipeline;
 using AiProxy.Pipeline.Middlewares;
+using AiProxy.Proxy;
+using AiProxy.Storage;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
@@ -12,7 +15,7 @@ public class CavemanMiddlewareTests
         string.Join(' ', Enumerable.Repeat("the quick brown fox jumps over the lazy dog.", 20));
 
     private static CavemanMiddleware Create(FakeCavemanTransformer transformer, CavemanOptions options) =>
-        new(transformer, Options.Create(new AiProxyOptions { Caveman = options }));
+        new(transformer, Options.Create(new AiProxyOptions { Caveman = options }), Array.Empty<IAuthProvider>());
 
     private static CavemanOptions EnabledOptions() => new()
     {
@@ -161,6 +164,98 @@ public class CavemanMiddlewareTests
         Assert.Equal(0, transformer.DecompressCalls);
         Assert.Single(chunks);
         Assert.NotNull(chunks[0].ToolCalls);
+    }
+
+    [Fact]
+    public void ValidateModels_returns_no_problems_when_disabled()
+    {
+        var transformer = new FakeCavemanTransformer();
+        var options = EnabledOptions();
+        options.Enabled = false;
+        var middleware = new CavemanMiddleware(
+            transformer, Options.Create(new AiProxyOptions { Caveman = options }), Array.Empty<IAuthProvider>());
+
+        var problems = middleware.ValidateModels(Array.Empty<ProviderResolver.ProviderModels>());
+
+        Assert.Empty(problems);
+        Assert.False(options.Enabled);
+    }
+
+    [Fact]
+    public void ValidateModels_returns_no_problems_when_provider_and_model_are_available()
+    {
+        var transformer = new FakeCavemanTransformer();
+        var options = EnabledOptions();
+        var middleware = new CavemanMiddleware(
+            transformer, Options.Create(new AiProxyOptions { Caveman = options }), Array.Empty<IAuthProvider>());
+        var providerModels = new[]
+        {
+            new ProviderResolver.ProviderModels(new StubProvider("ollama"), new[] { "test-model" }),
+        };
+
+        var problems = middleware.ValidateModels(providerModels);
+
+        Assert.Empty(problems);
+        Assert.True(options.Enabled);
+    }
+
+    [Fact]
+    public void ValidateModels_disables_caveman_when_provider_is_not_connected()
+    {
+        var transformer = new FakeCavemanTransformer();
+        var options = EnabledOptions();
+        var middleware = new CavemanMiddleware(
+            transformer, Options.Create(new AiProxyOptions { Caveman = options }), Array.Empty<IAuthProvider>());
+
+        var problems = middleware.ValidateModels(Array.Empty<ProviderResolver.ProviderModels>());
+
+        Assert.False(options.Enabled);
+        var problem = Assert.Single(problems);
+        Assert.Contains("ollama", problem);
+    }
+
+    [Fact]
+    public void ValidateModels_disables_caveman_when_model_is_not_exposed_by_provider()
+    {
+        var transformer = new FakeCavemanTransformer();
+        var options = EnabledOptions();
+        var middleware = new CavemanMiddleware(
+            transformer, Options.Create(new AiProxyOptions { Caveman = options }), Array.Empty<IAuthProvider>());
+        var providerModels = new[]
+        {
+            new ProviderResolver.ProviderModels(new StubProvider("ollama"), new[] { "some-other-model" }),
+        };
+
+        var problems = middleware.ValidateModels(providerModels);
+
+        Assert.False(options.Enabled);
+        var problem = Assert.Single(problems);
+        Assert.Contains("test-model", problem);
+    }
+
+    private sealed class StubProvider : IAuthProvider
+    {
+        public StubProvider(string name) => Name = name;
+
+        public string Name { get; }
+
+        public Task RunConnectAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+
+        public Task RunSelectModelsAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+
+        public Task<bool> LogoutAsync(CancellationToken cancellationToken = default) => Task.FromResult(false);
+
+        public Task<string> GetAccessTokenAsync(CancellationToken cancellationToken = default) =>
+            Task.FromResult("token");
+
+        public Task<IReadOnlyList<string>> GetSelectedModelsAsync(CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyList<string>>(Array.Empty<string>());
+
+        public Task<IReadOnlyDictionary<string, ModelInfo>> GetModelInfosAsync(CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyDictionary<string, ModelInfo>>(new Dictionary<string, ModelInfo>());
+
+        public Task<string?> GetUpstreamApiBaseUrlAsync(CancellationToken cancellationToken = default) =>
+            Task.FromResult<string?>(null);
     }
 
     private static async Task<List<ChatResponseChunk>> RunWithResponseAsync(

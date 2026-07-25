@@ -51,6 +51,19 @@ public static class ProxyCommand
             app.MapPost("/api/chat", OllamaEndpoints.Chat);
         }
 
+        // Catalog every model exposed by connected providers, then let each middleware that
+        // depends on configured model ids (Caveman, Fallback, Gearbox, ...) validate itself
+        // against it. A middleware with a bad model reference disables itself (fail-safe) and
+        // reports a problem here instead of misbehaving at request time.
+        var byProvider = await ProviderResolver.ListAllAsync(
+            app.Services.GetServices<IAuthProvider>(), cancellationToken).ConfigureAwait(false);
+
+        var startupWarnings = new List<string>();
+        foreach (var middleware in app.Services.GetServices<IChatMiddleware>().OfType<IStartupModelValidator>())
+        {
+            startupWarnings.AddRange(middleware.ValidateModels(byProvider));
+        }
+
         if (optionsAtBuild.Gearbox.Enabled)
         {
             // Gearbox control surface: a browser UI plus its tiny state/shift API.
@@ -94,8 +107,6 @@ public static class ProxyCommand
         }
 
         // Warn if no auth state, listing models per connected provider.
-        var byProvider = await ProviderResolver.ListAllAsync(
-            app.Services.GetServices<IAuthProvider>(), cancellationToken).ConfigureAwait(false);
         if (byProvider.Count == 0)
         {
             Console.WriteLine("  WARNING      : No connected providers. Run 'AiProxy connect <provider>' first.");
@@ -108,6 +119,16 @@ public static class ProxyCommand
             }
         }
         Console.WriteLine();
+
+        foreach (var warning in startupWarnings)
+        {
+            Console.WriteLine($"  WARNING      : {warning}");
+            logger.LogWarning("{Warning}", warning);
+        }
+        if (startupWarnings.Count > 0)
+        {
+            Console.WriteLine();
+        }
 
         try
         {

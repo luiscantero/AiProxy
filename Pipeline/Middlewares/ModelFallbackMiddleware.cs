@@ -30,7 +30,7 @@ namespace AiProxy.Pipeline.Middlewares;
 /// outer prompt-transform middlewares run only once; each fallback attempt simply re-sends the
 /// already-transformed request with a different model id.
 /// </summary>
-public sealed class ModelFallbackMiddleware : IChatMiddleware
+public sealed class ModelFallbackMiddleware : IChatMiddleware, IStartupModelValidator
 {
     private readonly IOptions<AiProxyOptions> _options;
     private readonly IEnumerable<IAuthProvider> _providers;
@@ -39,6 +39,45 @@ public sealed class ModelFallbackMiddleware : IChatMiddleware
     {
         _options = options;
         _providers = providers;
+    }
+
+    /// <summary>
+    /// Checks every model referenced by every configured chain against the models exposed by
+    /// connected providers. If any chain references a model nothing exposes, Fallback is
+    /// disabled for this run (fail-safe) and one problem per bad reference is returned for a
+    /// startup warning.
+    /// </summary>
+    public IReadOnlyList<string> ValidateModels(IReadOnlyList<ProviderResolver.ProviderModels> providerModels)
+    {
+        var fallback = _options.Value.Fallback;
+        if (!fallback.Enabled)
+        {
+            return Array.Empty<string>();
+        }
+
+        var available = new HashSet<string>(
+            providerModels.SelectMany(pm => pm.Models), StringComparer.OrdinalIgnoreCase);
+
+        var problems = new List<string>();
+        for (var i = 0; i < fallback.Chains.Count; i++)
+        {
+            foreach (var model in fallback.Chains[i].Models)
+            {
+                if (!available.Contains(model))
+                {
+                    problems.Add(
+                        $"Fallback chain {i + 1} references model '{model}', which is not " +
+                        "exposed by any connected provider");
+                }
+            }
+        }
+
+        if (problems.Count > 0)
+        {
+            fallback.Enabled = false;
+        }
+
+        return problems;
     }
 
     public async Task InvokeAsync(ChatPipelineContext context, ChatMiddlewareDelegate next)

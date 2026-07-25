@@ -165,6 +165,68 @@ public class GearboxMiddlewareTests
         Assert.Same(opus, context.Provider);
     }
 
+    [Fact]
+    public void ValidateModels_returns_no_problems_when_disabled()
+    {
+        var gearbox = new GearboxOptions
+        {
+            Enabled = false,
+            Gears = { new GearOptions { Position = "1", Model = "missing-model" } },
+        };
+        var middleware = Middleware(gearbox, StateFor(gearbox));
+
+        var problems = middleware.ValidateModels(Array.Empty<ProviderResolver.ProviderModels>());
+
+        Assert.Empty(problems);
+        Assert.False(gearbox.Enabled);
+    }
+
+    [Fact]
+    public void ValidateModels_returns_no_problems_when_every_gear_model_is_available()
+    {
+        var gearbox = new GearboxOptions
+        {
+            Enabled = true,
+            Gears =
+            {
+                new GearOptions { Position = "1", Model = "opus" },
+                new GearOptions { Position = "R", Label = "Default", Model = "" },
+            },
+        };
+        var middleware = Middleware(gearbox, StateFor(gearbox));
+        var providerModels = new[]
+        {
+            new ProviderResolver.ProviderModels(new StubProvider("opus"), new[] { "opus" }),
+        };
+
+        var problems = middleware.ValidateModels(providerModels);
+
+        Assert.Empty(problems);
+        Assert.True(gearbox.Enabled);
+    }
+
+    [Fact]
+    public void ValidateModels_disables_gearbox_and_reports_problem_for_unknown_model()
+    {
+        var gearbox = new GearboxOptions
+        {
+            Enabled = true,
+            Gears = { new GearOptions { Position = "1", Label = "Haiku", Model = "gpt-5.6-luna" } },
+        };
+        var middleware = Middleware(gearbox, StateFor(gearbox));
+        var providerModels = new[]
+        {
+            new ProviderResolver.ProviderModels(new StubProvider("sonnet"), new[] { "sonnet" }),
+        };
+
+        var problems = middleware.ValidateModels(providerModels);
+
+        Assert.False(gearbox.Enabled);
+        var problem = Assert.Single(problems);
+        Assert.Contains("gpt-5.6-luna", problem);
+        Assert.Contains("Haiku", problem);
+    }
+
     private sealed class StubProvider : IAuthProvider
     {
         private readonly string _model;

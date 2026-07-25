@@ -389,6 +389,17 @@ Opt-in via `Gearbox.Enabled`:
 > `/v1/models`). The client still has to request a model the proxy exposes — the
 > gearbox then redirects that request onto the engaged gear's model.
 
+#### Startup model validation
+
+Caveman, Model fallback, and Gearbox all reference model ids in configuration.
+At startup, once the proxy has catalogued the models exposed by every connected
+provider, each enabled middleware checks its own configured model(s) against
+that catalog. If a reference doesn't resolve (a typo, a retired model, a
+provider that isn't connected, ...) the proxy prints a friendly
+`WARNING` with details and **disables that middleware** for the run — the rest
+of the pipeline (and the proxy itself) starts normally, it just runs without
+the misconfigured feature until the config is fixed and the proxy restarts.
+
 #### Ideas for future middlewares
 
 Other Headroom-style stages that fit this architecture:
