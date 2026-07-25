@@ -30,7 +30,7 @@ editors, or scripts at `http://localhost:11434` and bring your own AI models.
   a provider outage by failing over from one vendor to another mid-request.*
 - **Gearbox / model shifter** — Bind models to gear positions and shift the whole
   proxy onto one from a small browser UI. *Flip every request between Haiku, Opus,
-  GPT, or Neutral with a click — no editor round-trip.*
+  Sol, or Neutral with a click — no editor round-trip.*
 - **Extensible by design** — Drop in your own ASP.NET-style middleware to
   transform requests and responses. *Add custom logging, redaction, or prompt
   rewriting in a few lines.*
@@ -379,7 +379,7 @@ Opt-in via `Gearbox.Enabled`:
     { "Position": "2", "Label": "Flash",   "Model": "gemini-3.1-flash" },
     { "Position": "3", "Label": "Sonnet",  "Model": "claude-sonnet-4.6" },
     { "Position": "4", "Label": "Opus",    "Model": "claude-opus-4" },
-    { "Position": "5", "Label": "GPT",     "Model": "gpt-5.5" },
+    { "Position": "5", "Label": "Sol",     "Model": "gpt-5.6-sol" },
     { "Position": "R", "Label": "Default", "Model": "" }   // empty model = pass-through
   ]
 }
