@@ -336,8 +336,8 @@ already-transformed request with a different model id. Opt-in via
   "RetryStatusCodes": [ 408, 409, 429, 500, 502, 503, 504, 529 ],
   "Chains": [
     {
-      // Clients request "claude-sonnet-4.6"; on failure try the next, then the next.
-      "Models": [ "claude-sonnet-4.6", "gpt-5.5", "gemini-3.1-pro" ]
+      // Clients request "gpt-5.6-sol"; on failure try the next, then the next.
+      "Models": [ "gpt-5.6-sol", "claude-sonnet-5.0", "gemini-3.1-pro" ]
     }
   ]
 }
@@ -375,11 +375,11 @@ Opt-in via `Gearbox.Enabled`:
   "Enabled": true,
   "Selected": "N",              // gear engaged at startup ("N" = Neutral / no override)
   "Gears": [
-    { "Position": "1", "Label": "Haiku",   "Model": "claude-haiku-4.6" },
+    { "Position": "1", "Label": "Luna",    "Model": "gpt-5.6-luna" },
     { "Position": "2", "Label": "Flash",   "Model": "gemini-3.1-flash" },
-    { "Position": "3", "Label": "Sonnet",  "Model": "claude-sonnet-4.6" },
-    { "Position": "4", "Label": "Opus",    "Model": "claude-opus-4" },
-    { "Position": "5", "Label": "Sol",     "Model": "gpt-5.6-sol" },
+    { "Position": "3", "Label": "Sonnet",  "Model": "claude-sonnet-5.0" },
+    { "Position": "4", "Label": "Sol",     "Model": "gpt-5.6-sol" },
+    { "Position": "5", "Label": "Opus",    "Model": "claude-opus-5" },
     { "Position": "R", "Label": "Default", "Model": "" }   // empty model = pass-through
   ]
 }
