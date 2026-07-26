@@ -191,8 +191,8 @@ public static class ProxyCommand
                 {
                     Cont($"  {line}");
                 }
+                Console.WriteLine();
             }
-            Console.WriteLine();
         }
 
         Row("Ready", "Press Ctrl+C to stop.");
