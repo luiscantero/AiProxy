@@ -12,9 +12,10 @@ namespace AiProxy.Pipeline;
 /// Implementations must be fail-safe: when a configured model cannot be found on any connected
 /// provider (typo, renamed/retired model, provider not connected, ...) they should disable
 /// themselves - typically by flipping their own <c>Options.Enabled</c> to <c>false</c> - and
-/// return one human-readable problem per bad reference so the caller can print a friendly
-/// warning. The proxy then continues startup without that middleware rather than failing to
-/// start or misbehaving at request time.
+/// return short, grouped problem lines (one per affected configuration entry, listing every bad
+/// model in that entry) so the caller can print them as a single friendly warning block. The
+/// proxy then continues startup without that middleware rather than failing to start or
+/// misbehaving at request time.
 /// </para>
 /// </summary>
 public interface IStartupModelValidator

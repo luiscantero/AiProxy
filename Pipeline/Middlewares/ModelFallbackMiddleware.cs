@@ -44,8 +44,8 @@ public sealed class ModelFallbackMiddleware : IChatMiddleware, IStartupModelVali
     /// <summary>
     /// Checks every model referenced by every configured chain against the models exposed by
     /// connected providers. If any chain references a model nothing exposes, Fallback is
-    /// disabled for this run (fail-safe) and one problem per bad reference is returned for a
-    /// startup warning.
+    /// disabled for this run (fail-safe) and one problem per affected chain (listing all of its
+    /// unknown models) is returned for a startup warning.
     /// </summary>
     public IReadOnlyList<string> ValidateModels(IReadOnlyList<ProviderResolver.ProviderModels> providerModels)
     {
@@ -61,14 +61,10 @@ public sealed class ModelFallbackMiddleware : IChatMiddleware, IStartupModelVali
         var problems = new List<string>();
         for (var i = 0; i < fallback.Chains.Count; i++)
         {
-            foreach (var model in fallback.Chains[i].Models)
+            var unknown = fallback.Chains[i].Models.Where(m => !available.Contains(m)).ToList();
+            if (unknown.Count > 0)
             {
-                if (!available.Contains(model))
-                {
-                    problems.Add(
-                        $"Fallback chain {i + 1} references model '{model}', which is not " +
-                        "exposed by any connected provider");
-                }
+                problems.Add($"Fallback chain {i + 1}: {string.Join(", ", unknown)}");
             }
         }
 

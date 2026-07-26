@@ -73,7 +73,6 @@ public static class ProxyCommand
         }
 
         var options = optionsAtBuild;
-        var logger = app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("AiProxy");
 
         Console.WriteLine();
         Console.WriteLine("== AiProxy ==");
@@ -120,13 +119,20 @@ public static class ProxyCommand
         }
         Console.WriteLine();
 
-        foreach (var warning in startupWarnings)
-        {
-            Console.WriteLine($"  WARNING      : {warning}");
-            logger.LogWarning("{Warning}", warning);
-        }
         if (startupWarnings.Count > 0)
         {
+            // One block instead of one line per bad model: the individual middlewares already
+            // grouped their problems, so this just prints the shared reason once. The check runs
+            // against the models listed above (the ones selected at connect time), not against
+            // everything the upstream offers - hence the hint to re-run 'AiProxy models'.
+            Console.WriteLine("  WARNING      : These configured models are not in the selected model list above,");
+            Console.WriteLine("                 so the features below are disabled for this run:");
+            foreach (var warning in startupWarnings)
+            {
+                Console.WriteLine($"                   - {warning}");
+            }
+            Console.WriteLine("                 Fix the ids in appsettings.json, or run 'AiProxy models <provider>'");
+            Console.WriteLine("                 to add them to the selection.");
             Console.WriteLine();
         }
 

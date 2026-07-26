@@ -39,7 +39,8 @@ public sealed class GearboxMiddleware : IChatMiddleware, IStartupModelValidator
     /// <summary>
     /// Checks every gear with a configured model against the models exposed by connected
     /// providers. If any gear points at a model nothing exposes, Gearbox is disabled for this
-    /// run (fail-safe) and one problem per bad gear is returned for a startup warning.
+    /// run (fail-safe) and a single problem listing every bad gear is returned for a startup
+    /// warning.
     /// </summary>
     public IReadOnlyList<string> ValidateModels(IReadOnlyList<ProviderResolver.ProviderModels> providerModels)
     {
@@ -52,7 +53,7 @@ public sealed class GearboxMiddleware : IChatMiddleware, IStartupModelValidator
         var available = new HashSet<string>(
             providerModels.SelectMany(pm => pm.Models), StringComparer.OrdinalIgnoreCase);
 
-        var problems = new List<string>();
+        var unknown = new List<string>();
         foreach (var gear in gearbox.Gears)
         {
             if (string.IsNullOrWhiteSpace(gear.Model))
@@ -64,18 +65,17 @@ public sealed class GearboxMiddleware : IChatMiddleware, IStartupModelValidator
             if (!available.Contains(gear.Model))
             {
                 var label = string.IsNullOrWhiteSpace(gear.Label) ? gear.Position : gear.Label;
-                problems.Add(
-                    $"Gearbox gear '{gear.Position}' ({label}) references model '{gear.Model}', " +
-                    "which is not exposed by any connected provider");
+                unknown.Add($"'{gear.Position}' ({label}) -> {gear.Model}");
             }
         }
 
-        if (problems.Count > 0)
+        if (unknown.Count == 0)
         {
-            gearbox.Enabled = false;
+            return Array.Empty<string>();
         }
 
-        return problems;
+        gearbox.Enabled = false;
+        return new[] { $"Gearbox gears: {string.Join(", ", unknown)}" };
     }
 
     public async Task InvokeAsync(ChatPipelineContext context, ChatMiddlewareDelegate next)
