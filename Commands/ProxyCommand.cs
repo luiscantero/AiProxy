@@ -74,50 +74,78 @@ public static class ProxyCommand
 
         var options = optionsAtBuild;
 
+        // --- Startup banner -------------------------------------------------------------
+        // Every line is either "  <label> : <value>" or an aligned continuation, so the whole
+        // banner reads as a single column of labels.
+        const int labelWidth = 16;
+        static void Row(string label, string value)
+            => Console.WriteLine($"  {label.PadRight(labelWidth)} : {value}");
+        static void Cont(string value)
+            => Console.WriteLine($"  {new string(' ', labelWidth)}   {value}");
+
         Console.WriteLine();
         Console.WriteLine("== AiProxy ==");
-        Console.WriteLine($"  Listening on : {options.ListenUrl}");
+        Console.WriteLine();
+        Row("Listening on", options.ListenUrl);
         Console.WriteLine();
 
         if (options.Apis.Ollama)
         {
-            Console.WriteLine("  VS Code BYOK : Use the 'Ollama' provider.");
-            Console.WriteLine($"                 Base URL = {options.ListenUrl.TrimEnd('/')}");
-            Console.WriteLine("                 (No API key required for the Ollama routes.)");
+            Row("VS Code BYOK", "Use the 'Ollama' provider");
+            Cont($"Base URL = {options.ListenUrl.TrimEnd('/')}");
+            Cont("No API key required for the Ollama routes");
             Console.WriteLine();
         }
 
         if (options.Apis.OpenAi)
         {
-            Console.WriteLine("  OpenAI-shape : (alternative for curl/scripts)");
-            Console.WriteLine($"                 Base URL = {options.ListenUrl.TrimEnd('/')}/v1");
+            Row("OpenAI-shape", "Alternative for curl/scripts");
+            Cont($"Base URL = {options.ListenUrl.TrimEnd('/')}/v1");
+            Console.WriteLine();
         }
 
         if (!options.Apis.Ollama && !options.Apis.OpenAi)
         {
-            Console.WriteLine("  WARNING      : Both Apis.Ollama and Apis.OpenAi are disabled. No routes are exposed.");
+            Row("WARNING", "Both Apis.Ollama and Apis.OpenAi are disabled.");
+            Cont("No routes are exposed.");
+            Console.WriteLine();
         }
 
         if (options.Gearbox.Enabled)
         {
+            Row("Gearbox", "Model shifter UI");
+            Cont($"{options.ListenUrl.TrimEnd('/')}/gearbox");
             Console.WriteLine();
-            Console.WriteLine("  Gearbox      : Open the model shifter in a browser.");
-            Console.WriteLine($"                 {options.ListenUrl.TrimEnd('/')}/gearbox");
         }
 
-        // Warn if no auth state, listing models per connected provider.
+        // Warn if no auth state, listing the selected models per connected provider.
         if (byProvider.Count == 0)
         {
-            Console.WriteLine("  WARNING      : No connected providers. Run 'AiProxy connect <provider>' first.");
+            Row("WARNING", "No connected providers.");
+            Cont("Run 'AiProxy connect <provider>' first.");
+            Console.WriteLine();
         }
         else
         {
             foreach (var (provider, models) in byProvider)
             {
-                Console.WriteLine($"  {provider.Name,-12} : {string.Join(", ", models)}");
+                Row("Provider", provider.Name);
+                var firstLine = true;
+                foreach (var line in WrapList(models, 58))
+                {
+                    if (firstLine)
+                    {
+                        Row("Selected models", line);
+                        firstLine = false;
+                    }
+                    else
+                    {
+                        Cont(line);
+                    }
+                }
+                Console.WriteLine();
             }
         }
-        Console.WriteLine();
 
         if (startupWarnings.Count > 0)
         {
@@ -125,16 +153,19 @@ public static class ProxyCommand
             // grouped their problems, so this just prints the shared reason once. The check runs
             // against the models listed above (the ones selected at connect time), not against
             // everything the upstream offers - hence the hint to re-run 'AiProxy models'.
-            Console.WriteLine("  WARNING      : These configured models are not in the selected model list above,");
-            Console.WriteLine("                 so the features below are disabled for this run:");
+            Row("WARNING", "These models are not in the selected list above,");
+            Cont("so the features below are disabled for this run:");
             foreach (var warning in startupWarnings)
             {
-                Console.WriteLine($"                   - {warning}");
+                Cont($"  - {warning}");
             }
-            Console.WriteLine("                 Fix the ids in appsettings.json, or run 'AiProxy models <provider>'");
-            Console.WriteLine("                 to add them to the selection.");
+            Cont("Fix the ids in appsettings.json, or run");
+            Cont("'AiProxy models <provider>' to select them.");
             Console.WriteLine();
         }
+
+        Row("Ready", "Press Ctrl+C to stop.");
+        Console.WriteLine();
 
         try
         {
@@ -145,6 +176,36 @@ public static class ProxyCommand
         {
             return 0;
         }
+    }
+
+    /// <summary>
+    /// Packs <paramref name="values"/> into comma-separated lines of at most
+    /// <paramref name="maxWidth"/> characters so long model lists stay inside the banner column.
+    /// </summary>
+    private static IReadOnlyList<string> WrapList(IReadOnlyList<string> values, int maxWidth)
+    {
+        var lines = new List<string>();
+        var current = new System.Text.StringBuilder();
+
+        foreach (var value in values)
+        {
+            var candidate = current.Length == 0 ? value : $"{current}, {value}";
+            if (current.Length > 0 && candidate.Length > maxWidth)
+            {
+                lines.Add(current.Append(',').ToString());
+                current.Clear().Append(value);
+                continue;
+            }
+
+            current.Clear().Append(candidate);
+        }
+
+        if (current.Length > 0)
+        {
+            lines.Add(current.ToString());
+        }
+
+        return lines;
     }
 }
 
