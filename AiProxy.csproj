@@ -8,6 +8,33 @@
     <RootNamespace>AiProxy</RootNamespace>
     <AssemblyName>AiProxy</AssemblyName>
     <InvariantGlobalization>true</InvariantGlobalization>
+    <!-- No wwwroot: skips the generated staticwebassets manifests in the output. -->
+    <StaticWebAssetsEnabled>false</StaticWebAssetsEnabled>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Only the base config ships; the Development overrides are a local dev concern. -->
+    <Content Update="appsettings.Development.json" CopyToPublishDirectory="Never" />
+  </ItemGroup>
+
+  <!--
+    Minimal-output release publish: `dotnet publish` writes exactly two files to publish/ -
+    a single AiProxy.exe (runtime config, deps and the SkiaSharp native library are bundled
+    inside it, no symbols, no web.config) plus the editable appsettings.json. Framework-
+    dependent, so the ASP.NET Core 10 runtime must be installed.
+
+    Only applied while publishing (_IsPublishing is set by `dotnet publish`), so a plain
+    `dotnet build` keeps its normal bin/<Configuration>/net10.0 layout.
+  -->
+  <PropertyGroup Condition="'$(_IsPublishing)' == 'true'">
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <SelfContained>false</SelfContained>
+    <PublishSingleFile>true</PublishSingleFile>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <IsTransformWebConfigDisabled>true</IsTransformWebConfigDisabled>
+    <DebugType>none</DebugType>
+    <DebugSymbols>false</DebugSymbols>
+    <PublishDir>$(MSBuildProjectDirectory)\publish\</PublishDir>
   </PropertyGroup>
 
   <ItemGroup>
