@@ -16,8 +16,16 @@ namespace AiProxy.Pipeline.Middlewares;
 ///   returns to observe the response as it streams back (here to count characters and tokens).</item>
 /// </list>
 /// </summary>
-public sealed class LoggingChatMiddleware : IChatMiddleware
+public sealed class LoggingChatMiddleware : IChatMiddleware, IMiddlewareInfo
 {
+    public string Name => "Logging";
+
+    public bool IsEnabled => true;
+
+    public string Description =>
+        "Logs one line per chat request and, once the response has streamed, its size, " +
+        "duration and share of the model context window. Always on; watch this console.";
+
     public async Task InvokeAsync(ChatPipelineContext context, ChatMiddlewareDelegate next)
     {
         var messageCount = (context.UpstreamRequest["messages"] as JsonArray)?.Count ?? 0;

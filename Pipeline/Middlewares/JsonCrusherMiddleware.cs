@@ -14,8 +14,16 @@ namespace AiProxy.Pipeline.Middlewares;
 /// re-serialized compactly with <see cref="System.Text.Json"/>, so no keys, nulls, or values are
 /// dropped. It is fail-open — any unexpected error leaves the request untouched.
 /// </summary>
-public sealed class JsonCrusherMiddleware : IChatMiddleware
+public sealed class JsonCrusherMiddleware : IChatMiddleware, IMiddlewareInfo
 {
+    public string Name => "JsonCrusher";
+
+    public bool IsEnabled => true;
+
+    public string Description =>
+        "Minifies JSON embedded in prompt messages (tool output, API responses) without " +
+        "dropping any data. Always on; nothing to configure.";
+
     public async Task InvokeAsync(ChatPipelineContext context, ChatMiddlewareDelegate next)
     {
         try

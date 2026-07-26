@@ -30,7 +30,7 @@ namespace AiProxy.Pipeline.Middlewares;
 /// outer prompt-transform middlewares run only once; each fallback attempt simply re-sends the
 /// already-transformed request with a different model id.
 /// </summary>
-public sealed class ModelFallbackMiddleware : IChatMiddleware, IStartupModelValidator
+public sealed class ModelFallbackMiddleware : IChatMiddleware, IStartupModelValidator, IMiddlewareInfo
 {
     private readonly IOptions<AiProxyOptions> _options;
     private readonly IEnumerable<IAuthProvider> _providers;
@@ -40,6 +40,16 @@ public sealed class ModelFallbackMiddleware : IChatMiddleware, IStartupModelVali
         _options = options;
         _providers = providers;
     }
+
+    public string Name => "ModelFallback";
+
+    public bool IsEnabled => _options.Value.Fallback.Enabled;
+
+    public string Description =>
+        "Retries a request against the next model in its chain when the upstream returns a " +
+        $"retryable status (429, 5xx); the swap is invisible to the client. " +
+        $"{_options.Value.Fallback.Chains.Count} chain(s) configured under Fallback.Chains " +
+        "in appsettings.json.";
 
     /// <summary>
     /// Checks every model referenced by every configured chain against the models exposed by

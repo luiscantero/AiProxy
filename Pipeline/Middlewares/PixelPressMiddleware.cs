@@ -17,7 +17,7 @@ namespace AiProxy.Pipeline.Middlewares;
 /// is disabled by default and enabled via <see cref="PixelPressOptions.Enabled"/>. It is fail-open:
 /// any rendering error leaves the request untouched.
 /// </summary>
-public sealed class PixelPressMiddleware : IChatMiddleware
+public sealed class PixelPressMiddleware : IChatMiddleware, IMiddlewareInfo
 {
     private const string HintText =
         "The following image contains text rendered as pixels to save tokens. " +
@@ -29,6 +29,16 @@ public sealed class PixelPressMiddleware : IChatMiddleware
     {
         _options = options;
     }
+
+    public string Name => "PixelPress";
+
+    public bool IsEnabled => _options.Value.PixelPress.Enabled;
+
+    public string Description =>
+        $"Renders {string.Join("/", _options.Value.PixelPress.Roles.Distinct(StringComparer.OrdinalIgnoreCase))} " +
+        $"text longer than {_options.Value.PixelPress.MinCharacters} characters into a PNG the " +
+        "model reads instead. Lossy - requires a vision-capable model; tune via PixelPress.* " +
+        "in appsettings.json.";
 
     public async Task InvokeAsync(ChatPipelineContext context, ChatMiddlewareDelegate next)
     {

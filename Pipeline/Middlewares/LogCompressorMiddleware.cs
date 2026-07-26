@@ -10,8 +10,16 @@ namespace AiProxy.Pipeline.Middlewares;
 /// lines and thinning long runs of low-severity (TRACE/DEBUG/INFO) lines, while always preserving
 /// warnings, errors, and stack traces. It never summarizes semantically and is fail-open.
 /// </summary>
-public sealed class LogCompressorMiddleware : IChatMiddleware
+public sealed class LogCompressorMiddleware : IChatMiddleware, IMiddlewareInfo
 {
+    public string Name => "LogCompressor";
+
+    public bool IsEnabled => true;
+
+    public string Description =>
+        "Squashes log output pasted into prompts by collapsing duplicate lines and thinning " +
+        "TRACE/DEBUG/INFO runs; warnings, errors and stack traces are kept. Always on.";
+
     private static readonly TimeSpan RegexTimeout = TimeSpan.FromMilliseconds(250);
 
     private static readonly Regex TimestampPattern = new(

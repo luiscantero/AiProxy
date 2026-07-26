@@ -13,8 +13,17 @@ namespace AiProxy.Pipeline.Middlewares;
 /// It operates inbound only and only on system messages — user/assistant/tool content is left
 /// untouched so real conversation data is never corrupted. It is fail-open.
 /// </summary>
-public sealed class CacheAlignerMiddleware : IChatMiddleware
+public sealed class CacheAlignerMiddleware : IChatMiddleware, IMiddlewareInfo
 {
+    public string Name => "CacheAligner";
+
+    public bool IsEnabled => true;
+
+    public string Description =>
+        "Replaces volatile tokens (dates, timestamps, UUIDs, session ids) in system prompts " +
+        "with fixed placeholders so the provider prompt cache keeps hitting. Always on; " +
+        "nothing to configure.";
+
     private static readonly TimeSpan RegexTimeout = TimeSpan.FromMilliseconds(250);
 
     // RFC 4122 UUID: 8-4-4-4-12 hex digits.

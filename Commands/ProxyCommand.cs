@@ -1,3 +1,4 @@
+using System.Text;
 using AiProxy.Auth;
 using AiProxy.Auth.Copilot;
 using AiProxy.Auth.OpenAiCompatible;
@@ -113,8 +114,8 @@ public static class ProxyCommand
 
         if (options.Gearbox.Enabled)
         {
-            Row("Gearbox", "Model shifter UI");
-            Cont($"{options.ListenUrl.TrimEnd('/')}/gearbox");
+            // The Gearbox middleware describes itself (and its URL) in the middleware list below.
+            Row("Gearbox UI", $"{options.ListenUrl.TrimEnd('/')}/gearbox");
             Console.WriteLine();
         }
 
@@ -131,7 +132,7 @@ public static class ProxyCommand
             {
                 Row("Provider", provider.Name);
                 var firstLine = true;
-                foreach (var line in WrapList(models, 58))
+                foreach (var line in Wrap(models, ", ", 58))
                 {
                     if (firstLine)
                     {
@@ -164,6 +165,36 @@ public static class ProxyCommand
             Console.WriteLine();
         }
 
+        // Active pipeline stages. Read after validation, so a middleware that disabled itself
+        // over a bad model reference is correctly left out.
+        var activeMiddlewares = app.Services.GetServices<IChatMiddleware>()
+            .OfType<IMiddlewareInfo>()
+            .Where(m => m.IsEnabled)
+            .ToList();
+
+        if (activeMiddlewares.Count > 0)
+        {
+            var firstMiddleware = true;
+            foreach (var middleware in activeMiddlewares)
+            {
+                if (firstMiddleware)
+                {
+                    Row("Middlewares", middleware.Name);
+                    firstMiddleware = false;
+                }
+                else
+                {
+                    Cont(middleware.Name);
+                }
+
+                foreach (var line in Wrap(middleware.Description.Split(' '), " ", 56))
+                {
+                    Cont($"  {line}");
+                }
+            }
+            Console.WriteLine();
+        }
+
         Row("Ready", "Press Ctrl+C to stop.");
         Console.WriteLine();
 
@@ -179,21 +210,23 @@ public static class ProxyCommand
     }
 
     /// <summary>
-    /// Packs <paramref name="values"/> into comma-separated lines of at most
-    /// <paramref name="maxWidth"/> characters so long model lists stay inside the banner column.
+    /// Packs <paramref name="parts"/> into <paramref name="separator"/>-joined lines of at most
+    /// <paramref name="maxWidth"/> characters so long lists and descriptions stay inside the
+    /// banner column. A line broken mid-list keeps its trailing separator (e.g. the comma).
     /// </summary>
-    private static IReadOnlyList<string> WrapList(IReadOnlyList<string> values, int maxWidth)
+    private static IReadOnlyList<string> Wrap(IEnumerable<string> parts, string separator, int maxWidth)
     {
         var lines = new List<string>();
-        var current = new System.Text.StringBuilder();
+        var current = new StringBuilder();
+        var breakSuffix = separator.TrimEnd();
 
-        foreach (var value in values)
+        foreach (var part in parts)
         {
-            var candidate = current.Length == 0 ? value : $"{current}, {value}";
+            var candidate = current.Length == 0 ? part : $"{current}{separator}{part}";
             if (current.Length > 0 && candidate.Length > maxWidth)
             {
-                lines.Add(current.Append(',').ToString());
-                current.Clear().Append(value);
+                lines.Add(current.Append(breakSuffix).ToString());
+                current.Clear().Append(part);
                 continue;
             }
 
@@ -259,7 +292,8 @@ internal static class ServiceRegistration
         //   LogCompressor — squashes redundant log blocks (dupes + low-severity runs).
         //   Caveman       — LLM-driven natural-language compression (opt-in via Caveman.Enabled).
         //   PixelPress    — renders bulky text to a PNG for vision models (opt-in via PixelPress.Enabled).
-        //   ModelFallback — retries an unavailable model against prioritized alternatives (opt-in).        services.AddSingleton<IChatMiddleware, LoggingChatMiddleware>();
+        //   ModelFallback — retries an unavailable model against prioritized alternatives (opt-in).
+        services.AddSingleton<IChatMiddleware, LoggingChatMiddleware>();
         services.AddSingleton<IChatMiddleware, CacheAlignerMiddleware>();
         services.AddSingleton<IChatMiddleware, JsonCrusherMiddleware>();
         services.AddSingleton<IChatMiddleware, LogCompressorMiddleware>();

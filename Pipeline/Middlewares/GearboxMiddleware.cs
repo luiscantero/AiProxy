@@ -23,7 +23,7 @@ namespace AiProxy.Pipeline.Middlewares;
 /// remaining transforms. It is <b>fail-open</b>: if the engaged gear maps to a model no connected
 /// provider exposes, the request is left on its original model rather than failing.
 /// </summary>
-public sealed class GearboxMiddleware : IChatMiddleware, IStartupModelValidator
+public sealed class GearboxMiddleware : IChatMiddleware, IStartupModelValidator, IMiddlewareInfo
 {
     private readonly IOptions<AiProxyOptions> _options;
     private readonly GearboxState _state;
@@ -35,6 +35,15 @@ public sealed class GearboxMiddleware : IChatMiddleware, IStartupModelValidator
         _state = state;
         _providers = providers;
     }
+
+    public string Name => "Gearbox";
+
+    public bool IsEnabled => _options.Value.Gearbox.Enabled;
+
+    public string Description =>
+        "Forces every request onto the model of the gear currently engaged, whatever model the " +
+        $"client asked for. Shift gears at {_options.Value.ListenUrl.TrimEnd('/')}/gearbox; " +
+        "Neutral (N) passes requests through untouched.";
 
     /// <summary>
     /// Checks every gear with a configured model against the models exposed by connected

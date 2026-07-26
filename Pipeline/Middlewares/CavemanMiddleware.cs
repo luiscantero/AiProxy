@@ -23,7 +23,7 @@ namespace AiProxy.Pipeline.Middlewares;
 /// The middleware is fail-open: any error (or a missing/misconfigured provider) leaves the
 /// original content untouched.
 /// </summary>
-public sealed class CavemanMiddleware : IChatMiddleware, IStartupModelValidator
+public sealed class CavemanMiddleware : IChatMiddleware, IStartupModelValidator, IMiddlewareInfo
 {
     private readonly ICavemanTransformer _transformer;
     private readonly IOptions<AiProxyOptions> _options;
@@ -38,6 +38,17 @@ public sealed class CavemanMiddleware : IChatMiddleware, IStartupModelValidator
         _options = options;
         _providers = providers;
     }
+
+    public string Name => "Caveman";
+
+    public bool IsEnabled => _options.Value.Caveman.Enabled;
+
+    public string Description =>
+        $"Uses {_options.Value.Caveman.Provider}/{_options.Value.Caveman.Model} to rewrite " +
+        $"{string.Join("/", _options.Value.Caveman.Roles.Distinct(StringComparer.OrdinalIgnoreCase))} " +
+        $"messages longer than {_options.Value.Caveman.MinCharacters} characters into terse " +
+        "caveman text before they go upstream. Point it at a cheap local model via Caveman.* " +
+        "in appsettings.json.";
 
     /// <summary>
     /// Checks the configured compression provider and model against connected providers. If the
