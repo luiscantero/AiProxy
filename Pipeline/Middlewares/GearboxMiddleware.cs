@@ -28,12 +28,18 @@ public sealed partial class GearboxMiddleware : IChatMiddleware, IStartupModelVa
     private readonly IOptions<AiProxyOptions> _options;
     private readonly GearboxState _state;
     private readonly IEnumerable<IAuthProvider> _providers;
+    private readonly ILogger<GearboxMiddleware> _logger;
 
-    public GearboxMiddleware(IOptions<AiProxyOptions> options, GearboxState state, IEnumerable<IAuthProvider> providers)
+    public GearboxMiddleware(
+        IOptions<AiProxyOptions> options,
+        GearboxState state,
+        IEnumerable<IAuthProvider> providers,
+        ILogger<GearboxMiddleware> logger)
     {
         _options = options;
         _state = state;
         _providers = providers;
+        _logger = logger;
     }
 
     public string Name => "Gearbox";
@@ -49,7 +55,8 @@ public sealed partial class GearboxMiddleware : IChatMiddleware, IStartupModelVa
     /// Checks every gear with a configured model against the models exposed by connected
     /// providers. If any gear points at a model nothing exposes, Gearbox is disabled for this
     /// run (fail-safe) and a single problem listing every bad gear is returned for a startup
-    /// warning.
+    /// warning. When the configuration is valid, the gear engaged at startup (and the model it
+    /// routes to) is logged so the active selection is visible from the very first line.
     /// </summary>
     public IReadOnlyList<string> ValidateModels(IReadOnlyList<ProviderResolver.ProviderModels> providerModels)
     {
@@ -80,11 +87,38 @@ public sealed partial class GearboxMiddleware : IChatMiddleware, IStartupModelVa
 
         if (unknown.Count == 0)
         {
+            LogStartupSelection(_logger, DescribeSelection(gearbox, _state));
             return Array.Empty<string>();
         }
 
         gearbox.Enabled = false;
         return new[] { $"Gearbox gears: {string.Join(", ", unknown)}" };
+    }
+
+    /// <summary>
+    /// Renders the engaged gear as "[position] label -> model", or a Neutral pass-through note.
+    /// Shared by the startup log and the gear-change log served by the /gearbox endpoint.
+    /// </summary>
+    public static string DescribeSelection(GearboxOptions gearbox, GearboxState state)
+    {
+        if (state.IsNeutral)
+        {
+            return "Neutral (N) - requests keep the model the client asked for";
+        }
+
+        var selected = state.Selected;
+        var gear = gearbox.Gears.FirstOrDefault(
+            g => string.Equals(g.Position, selected, StringComparison.OrdinalIgnoreCase));
+
+        if (gear is null)
+        {
+            return $"[{selected}] (unknown gear) - requests keep the model the client asked for";
+        }
+
+        var label = string.IsNullOrWhiteSpace(gear.Label) ? gear.Position : gear.Label;
+        return string.IsNullOrWhiteSpace(gear.Model)
+            ? $"[{gear.Position}] {label} - pass-through, requests keep the model the client asked for"
+            : $"[{gear.Position}] {label} -> {gear.Model}";
     }
 
     public async Task InvokeAsync(ChatPipelineContext context, ChatMiddlewareDelegate next)
@@ -149,4 +183,9 @@ public sealed partial class GearboxMiddleware : IChatMiddleware, IStartupModelVa
         Level = LogLevel.Information,
         Message = "Gearbox [{Gear}] shifting request from {Original} to {Model}.")]
     private static partial void LogShifting(ILogger logger, string gear, string original, string model);
+
+    [LoggerMessage(
+        Level = LogLevel.Information,
+        Message = "Gearbox enabled; engaged gear: {Selection}.")]
+    private static partial void LogStartupSelection(ILogger logger, string selection);
 }

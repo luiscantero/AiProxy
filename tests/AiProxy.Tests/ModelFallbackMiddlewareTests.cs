@@ -16,6 +16,9 @@ public class ModelFallbackMiddlewareTests
     private static AiProxyOptions OptionsWith(FallbackOptions fallback) =>
         new() { Fallback = fallback };
 
+    private static ModelFallbackMiddleware Middleware(FallbackOptions fallback, params IAuthProvider[] providers) =>
+        new(Options.Create(OptionsWith(fallback)), providers, NullLogger<ModelFallbackMiddleware>.Instance);
+
     private static ChatPipelineContext Context(string model, IAuthProvider provider) => new()
     {
         Http = new DefaultHttpContext(),
@@ -34,9 +37,7 @@ public class ModelFallbackMiddlewareTests
     [Fact]
     public async Task Passes_through_when_disabled()
     {
-        var middleware = new ModelFallbackMiddleware(
-            Options.Create(OptionsWith(new FallbackOptions { Enabled = false })),
-            Array.Empty<IAuthProvider>());
+        var middleware = Middleware(new FallbackOptions { Enabled = false });
 
         var context = Context("primary", new StubProvider("primary"));
         var calls = 0;
@@ -56,7 +57,7 @@ public class ModelFallbackMiddlewareTests
             Enabled = true,
             Chains = { new FallbackChain { Models = { "primary", "backup" } } },
         };
-        var middleware = new ModelFallbackMiddleware(Options.Create(OptionsWith(fallback)), providers);
+        var middleware = Middleware(fallback, providers);
 
         var context = Context("primary", providers[0]);
         var models = new List<string>();
@@ -87,7 +88,7 @@ public class ModelFallbackMiddlewareTests
             Enabled = true,
             Chains = { new FallbackChain { Models = { "primary", "backup" } } },
         };
-        var middleware = new ModelFallbackMiddleware(Options.Create(OptionsWith(fallback)), providers);
+        var middleware = Middleware(fallback, providers);
 
         var context = Context("primary", providers[0]);
         var calls = 0;
@@ -112,7 +113,7 @@ public class ModelFallbackMiddlewareTests
             Enabled = true,
             Chains = { new FallbackChain { Models = { "primary", "backup" } } },
         };
-        var middleware = new ModelFallbackMiddleware(Options.Create(OptionsWith(fallback)), providers);
+        var middleware = Middleware(fallback, providers);
 
         var context = Context("primary", providers[0]);
 
@@ -133,7 +134,7 @@ public class ModelFallbackMiddlewareTests
             Enabled = true,
             Chains = { new FallbackChain { Models = { "primary", "missing", "third" } } },
         };
-        var middleware = new ModelFallbackMiddleware(Options.Create(OptionsWith(fallback)), providers);
+        var middleware = Middleware(fallback, providers);
 
         var context = Context("primary", providers[0]);
         var models = new List<string>();
@@ -161,8 +162,7 @@ public class ModelFallbackMiddlewareTests
             Enabled = false,
             Chains = { new FallbackChain { Models = { "primary", "missing" } } },
         };
-        var middleware = new ModelFallbackMiddleware(
-            Options.Create(OptionsWith(fallback)), Array.Empty<IAuthProvider>());
+        var middleware = Middleware(fallback);
 
         var problems = middleware.ValidateModels(Array.Empty<ProviderResolver.ProviderModels>());
 
@@ -178,8 +178,7 @@ public class ModelFallbackMiddlewareTests
             Enabled = true,
             Chains = { new FallbackChain { Models = { "primary", "secondary" } } },
         };
-        var middleware = new ModelFallbackMiddleware(
-            Options.Create(OptionsWith(fallback)), Array.Empty<IAuthProvider>());
+        var middleware = Middleware(fallback);
         var providerModels = new[]
         {
             new ProviderResolver.ProviderModels(
@@ -200,8 +199,7 @@ public class ModelFallbackMiddlewareTests
             Enabled = true,
             Chains = { new FallbackChain { Models = { "primary", "missing-model" } } },
         };
-        var middleware = new ModelFallbackMiddleware(
-            Options.Create(OptionsWith(fallback)), Array.Empty<IAuthProvider>());
+        var middleware = Middleware(fallback);
         var providerModels = new[]
         {
             new ProviderResolver.ProviderModels(new StubProvider("primary"), new[] { "primary" }),

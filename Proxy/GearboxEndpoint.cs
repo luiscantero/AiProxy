@@ -1,6 +1,8 @@
 using System.Text.Json;
 using AiProxy.Auth;
+using AiProxy.Pipeline.Middlewares;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 namespace AiProxy.Proxy;
@@ -16,7 +18,7 @@ namespace AiProxy.Proxy;
 ///
 /// The engaged gear is held in <see cref="GearboxState"/>; the middleware reads it per request.
 /// </summary>
-public static class GearboxEndpoint
+public static partial class GearboxEndpoint
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
@@ -28,7 +30,11 @@ public static class GearboxEndpoint
         Results.Json(BuildState(options.Value.Gearbox, state), JsonOptions);
 
     /// <summary>Engages a gear by position (or "N" for Neutral) and returns the updated state.</summary>
-    public static async Task<IResult> Shift(HttpContext context, IOptions<AiProxyOptions> options, GearboxState state)
+    public static async Task<IResult> Shift(
+        HttpContext context,
+        IOptions<AiProxyOptions> options,
+        GearboxState state,
+        ILogger<GearboxState> logger)
     {
         var gearbox = options.Value.Gearbox;
 
@@ -59,8 +65,14 @@ public static class GearboxEndpoint
         }
 
         state.Selected = isNeutral ? GearboxState.Neutral : position;
+        LogGearChanged(logger, GearboxMiddleware.DescribeSelection(gearbox, state));
         return Results.Json(BuildState(gearbox, state), JsonOptions);
     }
+
+    [LoggerMessage(
+        Level = LogLevel.Information,
+        Message = "Gearbox shifted; engaged gear: {Selection}.")]
+    private static partial void LogGearChanged(ILogger logger, string selection);
 
     private static object BuildState(GearboxOptions gearbox, GearboxState state) => new
     {

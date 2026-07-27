@@ -34,11 +34,16 @@ public sealed partial class ModelFallbackMiddleware : IChatMiddleware, IStartupM
 {
     private readonly IOptions<AiProxyOptions> _options;
     private readonly IEnumerable<IAuthProvider> _providers;
+    private readonly ILogger<ModelFallbackMiddleware> _logger;
 
-    public ModelFallbackMiddleware(IOptions<AiProxyOptions> options, IEnumerable<IAuthProvider> providers)
+    public ModelFallbackMiddleware(
+        IOptions<AiProxyOptions> options,
+        IEnumerable<IAuthProvider> providers,
+        ILogger<ModelFallbackMiddleware> logger)
     {
         _options = options;
         _providers = providers;
+        _logger = logger;
     }
 
     public string Name => "ModelFallback";
@@ -55,7 +60,8 @@ public sealed partial class ModelFallbackMiddleware : IChatMiddleware, IStartupM
     /// Checks every model referenced by every configured chain against the models exposed by
     /// connected providers. If any chain references a model nothing exposes, Fallback is
     /// disabled for this run (fail-safe) and one problem per affected chain (listing all of its
-    /// unknown models) is returned for a startup warning.
+    /// unknown models) is returned for a startup warning. When every chain is valid, each chain's
+    /// primary model (the one clients request) and its alternatives are logged.
     /// </summary>
     public IReadOnlyList<string> ValidateModels(IReadOnlyList<ProviderResolver.ProviderModels> providerModels)
     {
@@ -81,6 +87,20 @@ public sealed partial class ModelFallbackMiddleware : IChatMiddleware, IStartupM
         if (problems.Count > 0)
         {
             fallback.Enabled = false;
+            return problems;
+        }
+
+        foreach (var chain in fallback.Chains)
+        {
+            if (chain.Models.Count == 0)
+            {
+                continue;
+            }
+
+            LogStartupChain(
+                _logger,
+                chain.Models[0],
+                chain.Models.Count > 1 ? string.Join(", ", chain.Models.Skip(1)) : "(none)");
         }
 
         return problems;
@@ -101,6 +121,11 @@ public sealed partial class ModelFallbackMiddleware : IChatMiddleware, IStartupM
         var retryStatusCodes = new HashSet<int>(options.RetryStatusCodes);
         UpstreamException? lastError = null;
         var attempted = false;
+
+        // Why the previous candidate was abandoned; carried into the warning emitted when the
+        // next candidate takes over so a single line states both the reason and the new model.
+        var failureReason = string.Empty;
+        var failedModel = string.Empty;
 
         for (var i = 0; i < chain.Count; i++)
         {
@@ -124,7 +149,7 @@ public sealed partial class ModelFallbackMiddleware : IChatMiddleware, IStartupM
                 context.Model = candidate;
                 context.UpstreamRequest["model"] = candidate;
 
-                LogFallingBack(context.Logger, candidate, i + 1, chain.Count);
+                LogFallingBack(context.Logger, failedModel, failureReason, candidate, i + 1, chain.Count);
             }
 
             attempted = true;
@@ -141,17 +166,26 @@ public sealed partial class ModelFallbackMiddleware : IChatMiddleware, IStartupM
             catch (UpstreamException ex) when (retryStatusCodes.Contains(ex.StatusCode))
             {
                 lastError = ex;
+                failedModel = candidate;
+                failureReason = $"upstream returned retryable status {ex.StatusCode}";
                 LogRetryableStatus(context.Logger, candidate, ex.StatusCode);
             }
             catch (HttpRequestException ex)
             {
                 // A transport-level failure (DNS, connection reset, timeout) is always retryable.
+                failedModel = candidate;
+                failureReason = $"the request failed at the transport level ({ex.Message})";
                 LogTransportFailure(context.Logger, ex, candidate);
             }
         }
 
         // Every candidate failed (or was unresolvable). Surface the last upstream error so the
         // client sees a real failure rather than an empty success.
+        if (failedModel.Length > 0)
+        {
+            LogChainExhausted(context.Logger, chain[0], failedModel, failureReason);
+        }
+
         if (lastError is not null)
         {
             throw lastError;
@@ -194,8 +228,10 @@ public sealed partial class ModelFallbackMiddleware : IChatMiddleware, IStartupM
 
     [LoggerMessage(
         Level = LogLevel.Warning,
-        Message = "Falling back to model {Model} (priority {Priority} of {Total}).")]
-    private static partial void LogFallingBack(ILogger logger, string model, int priority, int total);
+        Message = "Model {FailedModel} was abandoned because {Reason}; now using {Model} " +
+                  "(fallback priority {Priority} of {Total}).")]
+    private static partial void LogFallingBack(
+        ILogger logger, string failedModel, string reason, string model, int priority, int total);
 
     [LoggerMessage(
         Level = LogLevel.Information,
@@ -203,12 +239,24 @@ public sealed partial class ModelFallbackMiddleware : IChatMiddleware, IStartupM
     private static partial void LogFallbackServed(ILogger logger, string model);
 
     [LoggerMessage(
-        Level = LogLevel.Warning,
+        Level = LogLevel.Debug,
         Message = "Model {Model} returned retryable status {Status}; trying the next fallback.")]
     private static partial void LogRetryableStatus(ILogger logger, string model, int status);
 
     [LoggerMessage(
-        Level = LogLevel.Warning,
+        Level = LogLevel.Debug,
         Message = "Model {Model} request failed at the transport level; trying the next fallback.")]
     private static partial void LogTransportFailure(ILogger logger, Exception exception, string model);
+
+    [LoggerMessage(
+        Level = LogLevel.Warning,
+        Message = "Fallback chain for {PrimaryModel} is exhausted; the last candidate {FailedModel} " +
+                  "also failed because {Reason}.")]
+    private static partial void LogChainExhausted(
+        ILogger logger, string primaryModel, string failedModel, string reason);
+
+    [LoggerMessage(
+        Level = LogLevel.Information,
+        Message = "Fallback enabled for model {Model}; alternatives in priority order: {Alternatives}.")]
+    private static partial void LogStartupChain(ILogger logger, string model, string alternatives);
 }

@@ -24,7 +24,7 @@ public class GearboxMiddlewareTests
     }
 
     private static GearboxMiddleware Middleware(GearboxOptions gearbox, GearboxState state, params IAuthProvider[] providers) =>
-        new(Options.Create(new AiProxyOptions { Gearbox = gearbox }), state, providers);
+        new(Options.Create(new AiProxyOptions { Gearbox = gearbox }), state, providers, NullLogger<GearboxMiddleware>.Instance);
 
     private static ChatPipelineContext Context(string model, IAuthProvider provider) => new()
     {
