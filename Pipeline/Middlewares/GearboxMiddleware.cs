@@ -108,22 +108,16 @@ public sealed partial class GearboxMiddleware : IChatMiddleware, IStartupModelVa
             }
         }
 
-        if (unknown.Count == 0)
-        {
-            LogStartupSelection(_logger, DescribeSelection(gearbox, _state));
-            return Array.Empty<string>();
-        }
-
         // Report in configuration order rather than the reverse order they were removed in.
         unknown.Reverse();
-        var problems = new[]
-        {
-            $"Gearbox gears: {string.Join(", ", unknown)} (removed from the shifter)"
-        };
+        var problems = unknown.Count == 0
+            ? Array.Empty<string>()
+            : new[] { $"Gearbox gears: {string.Join(", ", unknown)} (removed from the shifter)" };
 
         if (!gearbox.Gears.Any(g => !string.IsNullOrWhiteSpace(g.Model)))
         {
-            // Every gear that could route somewhere is gone; there is nothing left to shift into.
+            // Nothing left to shift into: either every gear was pruned, or there was no connected
+            // model to build one from. An empty shifter is worse than an honest "disabled".
             gearbox.Enabled = false;
             return problems;
         }

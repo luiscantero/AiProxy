@@ -303,6 +303,19 @@ public class GearboxMiddlewareTests
     }
 
     [Fact]
+    public void ValidateModels_disables_gearbox_when_no_models_are_connected()
+    {
+        var gearbox = new GearboxOptions { Enabled = true };
+        var middleware = Middleware(gearbox, StateFor(gearbox));
+
+        var problems = middleware.ValidateModels(Array.Empty<ProviderResolver.ProviderModels>());
+
+        problems.Should().BeEmpty();
+        gearbox.Gears.Should().BeEmpty();
+        gearbox.Enabled.Should().BeFalse();
+    }
+
+    [Fact]
     public void ValidateModels_caps_auto_gears_at_MaxAutoGears()
     {
         var gearbox = new GearboxOptions { Enabled = true, MaxAutoGears = 2 };
