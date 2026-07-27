@@ -245,9 +245,17 @@ public sealed class GearboxOptions
 
     /// <summary>
     /// The gears available on the shifter, in display order. Each binds a position (e.g. "1".."6"
-    /// or "R") to the model engaged when that gear is selected.
+    /// or "R") to the model engaged when that gear is selected. Leave this <b>empty</b> to have the
+    /// shifter built automatically at startup from the models you have connected — then there are
+    /// no model ids here to go stale.
     /// </summary>
     public List<GearOptions> Gears { get; set; } = new();
+
+    /// <summary>
+    /// How many gears to generate when <see cref="Gears"/> is left empty. The shifter UI lays the
+    /// gears out in two rows, so a handful keeps it readable. Default 6.
+    /// </summary>
+    public int MaxAutoGears { get; set; } = 6;
 }
 
 /// <summary>

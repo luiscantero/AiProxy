@@ -77,11 +77,17 @@ dotnet run -- models openrouter # re-select models for another provider
 
 ## Configuration
 
-Edit [appsettings.json](appsettings.json) (or `appsettings.Development.json`):
+Edit [appsettings.json](appsettings.json) (or `appsettings.Development.json`).
+Every setting is described by [appsettings.schema.json](appsettings.schema.json),
+which is wired up in [.vscode/settings.json](.vscode/settings.json) — so VS Code
+gives you completion, inline documentation, and squiggles on typos or invalid
+values while you edit.
 
 - `ListenUrl` — address the proxy binds to. Default `http://localhost:11434`
   (the Ollama port, so Ollama-aware tools work out of the box).
 - `ProxyApiKey` — optional. If set, clients must send it as a bearer token.
+  It can also be supplied as an environment variable instead of being stored in
+  the file.
 - `Copilot:ClientId` / `Copilot:UpstreamBaseUrl` — Copilot device-flow client
   and upstream API base. The defaults work for normal Copilot accounts.
 - `Apis:Ollama` / `Apis:OpenAi` — toggle which API surfaces are exposed.
@@ -376,10 +382,15 @@ already-transformed request with a different model id. Opt-in via
 
 Inspired by the ["Model Shift" gear-shifter idea](https://x.com/VaibhavSisinty/status/2072983741396582475),
 the [GearboxMiddleware](Pipeline/Middlewares/GearboxMiddleware.cs) turns model
-selection into a **manual transmission**. You bind each gear position to a model
-in configuration, then flip between them from a small shifter UI in your browser.
-Every incoming chat request is re-routed onto whichever gear is currently
-engaged — no matter which model the client (e.g. VS Code) actually asked for.
+selection into a **manual transmission**. Each gear position is bound to a model,
+and you flip between them from a small shifter UI in your browser. Every incoming
+chat request is re-routed onto whichever gear is currently engaged — no matter
+which model the client (e.g. VS Code) actually asked for.
+
+Leave `Gears` **empty** and the shifter is built for you at startup: one gear per
+connected model, in selection order, up to `MaxAutoGears`. Like `Fallback`'s Auto
+mode, that leaves no model ids in configuration to go stale. Fill `Gears` in only
+when you want specific positions, ordering, or labels.
 
 - **Neutral** (`N`, the default) is a pass-through: the client's own model choice
   is honored. Any gear with an empty `Model` behaves the same way — handy for a
@@ -405,18 +416,25 @@ Opt-in via `Gearbox.Enabled`:
 "Gearbox": {
   "Enabled": true,
   "Selected": "N",              // gear engaged at startup ("N" = Neutral / no override)
-  "Gears": [
-    { "Position": "1", "Label": "Luna",    "Model": "gpt-5.6-luna" },
-    { "Position": "2", "Label": "Flash",   "Model": "gemini-3.1-flash" },
-    { "Position": "3", "Label": "Sonnet",  "Model": "claude-sonnet-5.0" },
-    { "Position": "4", "Label": "Sol",     "Model": "gpt-5.6-sol" },
-    { "Position": "5", "Label": "Opus",    "Model": "claude-opus-5" },
-    { "Position": "R", "Label": "Default", "Model": "" }   // empty model = pass-through
-  ]
+  "MaxAutoGears": 6,            // how many gears to build when "Gears" is empty
+  "Gears": []                   // leave empty to derive the shifter from connected models
 }
 ```
 
-> The models you list must be exposed by a connected provider (they show up in
+Or pin the layout yourself:
+
+```jsonc
+"Gears": [
+  { "Position": "1", "Label": "Luna",    "Model": "gpt-5.6-luna" },
+  { "Position": "2", "Label": "Flash",   "Model": "gemini-3.1-flash" },
+  { "Position": "3", "Label": "Sonnet",  "Model": "claude-sonnet-5.0" },
+  { "Position": "4", "Label": "Sol",     "Model": "gpt-5.6-sol" },
+  { "Position": "5", "Label": "Opus",    "Model": "claude-opus-5" },
+  { "Position": "R", "Label": "Default", "Model": "" }   // empty model = pass-through
+]
+```
+
+> Any model you list must be exposed by a connected provider (they show up in
 > `/v1/models`). The client still has to request a model the proxy exposes — the
 > gearbox then redirects that request onto the engaged gear's model.
 

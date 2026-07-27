@@ -160,7 +160,10 @@ public static partial class GearboxEndpoint
   }
   .cell:hover { border-color: #3b93ff55; transform: translateY(-1px); }
   .cell .pos { font-size: 18px; font-weight: 700; line-height: 1; }
-  .cell .lbl { font-size: 10px; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); }
+  .cell .lbl {
+    font-size: 10px; letter-spacing: .12em; text-transform: uppercase; color: var(--muted);
+    max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
   .cell.active {
     border-color: var(--accent);
     background: radial-gradient(120px 60px at 50% 0%, #3a3413, #171c25);

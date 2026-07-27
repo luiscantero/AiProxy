@@ -49,16 +49,20 @@ public sealed partial class GearboxMiddleware : IChatMiddleware, IStartupModelVa
     public string Description =>
         "Forces every request onto the model of the gear currently engaged, whatever model the " +
         $"client asked for. Shift gears at {_options.Value.ListenUrl.TrimEnd('/')}/gearbox; " +
-        "Neutral (N) passes requests through untouched.";
+        "Neutral (N) passes requests through untouched. " +
+        (_options.Value.Gearbox.Gears.Count == 0
+            ? $"Gears are built automatically from the first {_options.Value.Gearbox.MaxAutoGears} " +
+              "connected models."
+            : $"{_options.Value.Gearbox.Gears.Count} gear(s) available.");
 
     /// <summary>
-    /// Checks every gear with a configured model against the models exposed by connected
-    /// providers. A gear pointing at a model nothing exposes is <b>removed from the shifter</b>
-    /// rather than switching the whole gearbox off, so one retired model id costs you one gear
-    /// instead of the feature; the removed gears are still reported for a startup warning. Gearbox
-    /// only disables itself when no gear with a model is left. When the configuration is valid, the
-    /// gear engaged at startup (and the model it routes to) is logged so the active selection is
-    /// visible from the very first line.
+    /// Builds the shifter when no gears were configured, then checks every gear with a model
+    /// against the models exposed by connected providers. A gear pointing at a model nothing
+    /// exposes is <b>removed from the shifter</b> rather than switching the whole gearbox off, so
+    /// one retired model id costs you one gear instead of the feature; the removed gears are still
+    /// reported for a startup warning. Gearbox only disables itself when no gear with a model is
+    /// left. Finally the gear engaged at startup (and the model it routes to) is logged so the
+    /// active selection is visible from the very first line.
     /// </summary>
     public IReadOnlyList<string> ValidateModels(IReadOnlyList<ProviderResolver.ProviderModels> providerModels)
     {
@@ -66,6 +70,15 @@ public sealed partial class GearboxMiddleware : IChatMiddleware, IStartupModelVa
         if (!gearbox.Enabled)
         {
             return Array.Empty<string>();
+        }
+
+        if (gearbox.Gears.Count == 0)
+        {
+            // Nothing configured: derive the shifter from what is actually connected. Auto gears
+            // are built from the live catalog, so they can never reference a stale model id and
+            // the loop below has nothing to prune.
+            PopulateAutoGears(gearbox, providerModels);
+            LogAutoGears(_logger, gearbox.Gears.Count);
         }
 
         var available = new HashSet<string>(
@@ -117,6 +130,31 @@ public sealed partial class GearboxMiddleware : IChatMiddleware, IStartupModelVa
 
         LogStartupSelection(_logger, DescribeSelection(gearbox, _state));
         return problems;
+    }
+
+    /// <summary>
+    /// Fills the shifter with one gear per connected model, in selection order, at positions
+    /// "1".."N" (capped by <see cref="GearboxOptions.MaxAutoGears"/>). The label is left empty so
+    /// the UI shows the model id itself — there is no invented name to get out of sync.
+    /// </summary>
+    private static void PopulateAutoGears(
+        GearboxOptions gearbox, IReadOnlyList<ProviderResolver.ProviderModels> providerModels)
+    {
+        var models = providerModels
+            .SelectMany(pm => pm.Models)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(Math.Max(0, gearbox.MaxAutoGears));
+
+        var position = 1;
+        foreach (var model in models)
+        {
+            gearbox.Gears.Add(new GearOptions
+            {
+                Position = position.ToString(),
+                Model = model
+            });
+            position++;
+        }
     }
 
     /// <summary>
@@ -212,4 +250,9 @@ public sealed partial class GearboxMiddleware : IChatMiddleware, IStartupModelVa
         Level = LogLevel.Information,
         Message = "Gearbox enabled; engaged gear: {Selection}.")]
     private static partial void LogStartupSelection(ILogger logger, string selection);
+
+    [LoggerMessage(
+        Level = LogLevel.Information,
+        Message = "Gearbox has no configured gears; built {Count} gear(s) from the connected models.")]
+    private static partial void LogAutoGears(ILogger logger, int count);
 }

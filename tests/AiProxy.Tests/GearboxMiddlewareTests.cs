@@ -281,6 +281,63 @@ public class GearboxMiddlewareTests
         state.IsNeutral.Should().BeTrue();
     }
 
+    [Fact]
+    public void ValidateModels_builds_gears_from_connected_models_when_none_are_configured()
+    {
+        var gearbox = new GearboxOptions { Enabled = true };
+        var middleware = Middleware(gearbox, StateFor(gearbox));
+        var providerModels = new[]
+        {
+            new ProviderResolver.ProviderModels(
+                new StubProvider("opus"), new[] { "opus", "sonnet" }),
+            new ProviderResolver.ProviderModels(
+                new StubProvider("local"), new[] { "local" }),
+        };
+
+        var problems = middleware.ValidateModels(providerModels);
+
+        problems.Should().BeEmpty();
+        gearbox.Enabled.Should().BeTrue();
+        gearbox.Gears.Select(g => g.Position).Should().Equal("1", "2", "3");
+        gearbox.Gears.Select(g => g.Model).Should().Equal("opus", "sonnet", "local");
+    }
+
+    [Fact]
+    public void ValidateModels_caps_auto_gears_at_MaxAutoGears()
+    {
+        var gearbox = new GearboxOptions { Enabled = true, MaxAutoGears = 2 };
+        var middleware = Middleware(gearbox, StateFor(gearbox));
+        var providerModels = new[]
+        {
+            new ProviderResolver.ProviderModels(
+                new StubProvider("opus"), new[] { "opus", "sonnet", "haiku" }),
+        };
+
+        middleware.ValidateModels(providerModels);
+
+        gearbox.Gears.Select(g => g.Model).Should().Equal("opus", "sonnet");
+    }
+
+    [Fact]
+    public void ValidateModels_does_not_build_gears_when_some_are_configured()
+    {
+        var gearbox = new GearboxOptions
+        {
+            Enabled = true,
+            Gears = { new GearOptions { Position = "1", Model = "opus" } },
+        };
+        var middleware = Middleware(gearbox, StateFor(gearbox));
+        var providerModels = new[]
+        {
+            new ProviderResolver.ProviderModels(
+                new StubProvider("opus"), new[] { "opus", "sonnet" }),
+        };
+
+        middleware.ValidateModels(providerModels);
+
+        gearbox.Gears.Select(g => g.Model).Should().Equal("opus");
+    }
+
     private sealed class StubProvider : IAuthProvider
     {
         private readonly string _model;
