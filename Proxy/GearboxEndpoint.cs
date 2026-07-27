@@ -157,12 +157,14 @@ public static partial class GearboxEndpoint
     border: 1px solid var(--edge); border-radius: 12px;
     padding: 12px 8px; text-align: center; transition: transform .08s, border-color .15s, box-shadow .15s;
     display: flex; flex-direction: column; gap: 3px; align-items: center;
+    /* Grid items default to min-content width; without this a long label widens the column. */
+    min-width: 0;
   }
   .cell:hover { border-color: #3b93ff55; transform: translateY(-1px); }
   .cell .pos { font-size: 18px; font-weight: 700; line-height: 1; }
   .cell .lbl {
     font-size: 10px; letter-spacing: .12em; text-transform: uppercase; color: var(--muted);
-    max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
   .cell.active {
     border-color: var(--accent);

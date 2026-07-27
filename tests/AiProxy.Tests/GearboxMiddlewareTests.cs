@@ -331,6 +331,37 @@ public class GearboxMiddlewareTests
         gearbox.Gears.Select(g => g.Model).Should().Equal("opus", "sonnet");
     }
 
+    [Theory]
+    [InlineData("claude-opus-5", "Opus")]
+    [InlineData("claude-sonnet-5", "Sonnet")]
+    [InlineData("gemini-3.6-flash", "Flash")]
+    [InlineData("gpt-5.6-luna", "Luna")]
+    [InlineData("gpt-5.6-terra", "Terra")]
+    [InlineData("gpt-4o", "4o")]                     // nothing but the family and a variant
+    [InlineData("o3-mini", "O3-Mini")]               // unknown family: keep both segments
+    [InlineData("llama3.1:8b", "Llama3.1-8b")]       // ollama-style tag
+    [InlineData("claude-3-5-sonnet-20241022", "Sonnet")]
+    [InlineData("gpt-5.6", "Gpt")]                   // family only: better than an empty label
+    [InlineData("5.6", "5.6")]                       // version only: nothing to shorten
+    public void DeriveLabel_shortens_model_ids(string model, string expected) =>
+        GearboxMiddleware.DeriveLabel(model).Should().Be(expected);
+
+    [Fact]
+    public void ValidateModels_labels_auto_gears_from_their_model_id()
+    {
+        var gearbox = new GearboxOptions { Enabled = true };
+        var middleware = Middleware(gearbox, StateFor(gearbox));
+        var providerModels = new[]
+        {
+            new ProviderResolver.ProviderModels(
+                new StubProvider("opus"), new[] { "claude-opus-5", "gemini-3.6-flash" }),
+        };
+
+        middleware.ValidateModels(providerModels);
+
+        gearbox.Gears.Select(g => g.Label).Should().Equal("Opus", "Flash");
+    }
+
     [Fact]
     public void ValidateModels_does_not_build_gears_when_some_are_configured()
     {
