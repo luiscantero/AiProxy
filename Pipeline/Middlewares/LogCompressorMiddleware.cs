@@ -10,7 +10,7 @@ namespace AiProxy.Pipeline.Middlewares;
 /// lines and thinning long runs of low-severity (TRACE/DEBUG/INFO) lines, while always preserving
 /// warnings, errors, and stack traces. It never summarizes semantically and is fail-open.
 /// </summary>
-public sealed class LogCompressorMiddleware : IChatMiddleware, IMiddlewareInfo
+public sealed partial class LogCompressorMiddleware : IChatMiddleware, IMiddlewareInfo
 {
     public string Name => "LogCompressor";
 
@@ -45,11 +45,11 @@ public sealed class LogCompressorMiddleware : IChatMiddleware, IMiddlewareInfo
         }
         catch (RegexMatchTimeoutException ex)
         {
-            context.Logger.LogDebug(ex, "LogCompressor: regex timeout during processing; request left unchanged.");
+            LogRegexTimeout(context.Logger, ex);
         }
         catch (Exception ex)
         {
-            context.Logger.LogDebug(ex, "LogCompressor: error during compression; request left unchanged.");
+            LogCompressFailed(context.Logger, ex);
         }
 
         await next(context).ConfigureAwait(false);
@@ -104,10 +104,7 @@ public sealed class LogCompressorMiddleware : IChatMiddleware, IMiddlewareInfo
 
         if (totalSavedChars > 0)
         {
-            context.Logger.LogInformation(
-                "LogCompressor: squashed log content, saved {SavedChars} chars across {Blocks} message(s).",
-                totalSavedChars,
-                compressedCount);
+            LogSquashed(context.Logger, totalSavedChars, compressedCount);
         }
     }
 
@@ -267,4 +264,23 @@ public sealed class LogCompressorMiddleware : IChatMiddleware, IMiddlewareInfo
 
         return result;
     }
+
+    // ----------------------------------------------------------------------
+    // Structured logging (source-generated)
+    // ----------------------------------------------------------------------
+
+    [LoggerMessage(
+        Level = LogLevel.Debug,
+        Message = "LogCompressor: regex timeout during processing; request left unchanged.")]
+    private static partial void LogRegexTimeout(ILogger logger, Exception exception);
+
+    [LoggerMessage(
+        Level = LogLevel.Debug,
+        Message = "LogCompressor: error during compression; request left unchanged.")]
+    private static partial void LogCompressFailed(ILogger logger, Exception exception);
+
+    [LoggerMessage(
+        Level = LogLevel.Information,
+        Message = "LogCompressor: squashed log content, saved {SavedChars} chars across {Blocks} message(s).")]
+    private static partial void LogSquashed(ILogger logger, int savedChars, int blocks);
 }

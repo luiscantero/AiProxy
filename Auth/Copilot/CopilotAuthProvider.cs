@@ -4,7 +4,7 @@ using Microsoft.Extensions.Logging;
 
 namespace AiProxy.Auth.Copilot;
 
-public sealed class CopilotAuthProvider : IAuthProvider
+public sealed partial class CopilotAuthProvider : IAuthProvider
 {
     public const string ProviderName = "copilot";
 
@@ -235,7 +235,7 @@ public sealed class CopilotAuthProvider : IAuthProvider
                     "Stored Copilot auth state is missing the GitHub OAuth token. Re-run 'AiProxy connect copilot'.");
             }
 
-            _logger.LogInformation("Refreshing Copilot bearer token.");
+            LogRefreshingBearerToken(_logger);
             var refreshed = await _tokenClient.ExchangeAsync(state.GhOAuthToken, cancellationToken).ConfigureAwait(false);
             var updated = state with
             {
@@ -328,4 +328,13 @@ public sealed class CopilotAuthProvider : IAuthProvider
             // Best-effort only.
         }
     }
+
+    // ----------------------------------------------------------------------
+    // Structured logging (source-generated)
+    // ----------------------------------------------------------------------
+
+    [LoggerMessage(
+        Level = LogLevel.Information,
+        Message = "Refreshing Copilot bearer token.")]
+    private static partial void LogRefreshingBearerToken(ILogger logger);
 }

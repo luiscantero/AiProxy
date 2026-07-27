@@ -23,7 +23,7 @@ namespace AiProxy.Pipeline.Middlewares;
 /// remaining transforms. It is <b>fail-open</b>: if the engaged gear maps to a model no connected
 /// provider exposes, the request is left on its original model rather than failing.
 /// </summary>
-public sealed class GearboxMiddleware : IChatMiddleware, IStartupModelValidator, IMiddlewareInfo
+public sealed partial class GearboxMiddleware : IChatMiddleware, IStartupModelValidator, IMiddlewareInfo
 {
     private readonly IOptions<AiProxyOptions> _options;
     private readonly GearboxState _state;
@@ -121,17 +121,12 @@ public sealed class GearboxMiddleware : IChatMiddleware, IStartupModelValidator,
 
         if (provider is null)
         {
-            context.Logger.LogWarning(
-                "Gearbox gear [{Gear}] maps to model {Model}, which no connected provider exposes; " +
-                "leaving the request on {Original}.",
-                selected, gear.Model, context.Model);
+            LogGearModelUnavailable(context.Logger, selected, gear.Model, context.Model);
             await next(context).ConfigureAwait(false);
             return;
         }
 
-        context.Logger.LogInformation(
-            "Gearbox [{Gear}] shifting request from {Original} to {Model}.",
-            selected, context.Model, gear.Model);
+        LogShifting(context.Logger, selected, context.Model, gear.Model);
 
         context.Provider = provider;
         context.Model = gear.Model;
@@ -139,4 +134,19 @@ public sealed class GearboxMiddleware : IChatMiddleware, IStartupModelValidator,
 
         await next(context).ConfigureAwait(false);
     }
+
+    // ----------------------------------------------------------------------
+    // Structured logging (source-generated)
+    // ----------------------------------------------------------------------
+
+    [LoggerMessage(
+        Level = LogLevel.Warning,
+        Message = "Gearbox gear [{Gear}] maps to model {Model}, which no connected provider exposes; " +
+                  "leaving the request on {Original}.")]
+    private static partial void LogGearModelUnavailable(ILogger logger, string gear, string model, string original);
+
+    [LoggerMessage(
+        Level = LogLevel.Information,
+        Message = "Gearbox [{Gear}] shifting request from {Original} to {Model}.")]
+    private static partial void LogShifting(ILogger logger, string gear, string original, string model);
 }

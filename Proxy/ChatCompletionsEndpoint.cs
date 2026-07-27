@@ -16,7 +16,7 @@ namespace AiProxy.Proxy;
 /// the upstream call, response transforms, ...), and serializes the normalized response back
 /// into OpenAI SSE / JSON. All transformation logic lives in pipeline middlewares.
 /// </summary>
-public static class ChatCompletionsEndpoint
+public static partial class ChatCompletionsEndpoint
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
@@ -80,13 +80,13 @@ public static class ChatCompletionsEndpoint
         }
         catch (UpstreamException ex)
         {
-            logger.LogWarning("Upstream returned {Status}: {Body}", ex.StatusCode, ex.Body);
+            LogUpstreamStatus(logger, ex.StatusCode, ex.Body);
             await WriteErrorAsync(context, ex.StatusCode, ex.Body, "upstream_error");
             return;
         }
         catch (HttpRequestException ex)
         {
-            logger.LogWarning(ex, "Upstream request failed.");
+            LogUpstreamRequestFailed(logger, ex);
             await WriteErrorAsync(context, StatusCodes.Status502BadGateway, $"Upstream error: {ex.Message}", "bad_gateway");
             return;
         }
@@ -256,4 +256,18 @@ public static class ChatCompletionsEndpoint
         }, JsonOptions);
         await context.Response.WriteAsync(json);
     }
+
+    // ----------------------------------------------------------------------
+    // Structured logging (source-generated)
+    // ----------------------------------------------------------------------
+
+    [LoggerMessage(
+        Level = LogLevel.Warning,
+        Message = "Upstream returned {Status}: {Body}")]
+    private static partial void LogUpstreamStatus(ILogger logger, int status, string body);
+
+    [LoggerMessage(
+        Level = LogLevel.Warning,
+        Message = "Upstream request failed.")]
+    private static partial void LogUpstreamRequestFailed(ILogger logger, Exception exception);
 }

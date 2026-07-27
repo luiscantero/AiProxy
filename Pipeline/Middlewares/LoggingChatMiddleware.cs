@@ -16,7 +16,7 @@ namespace AiProxy.Pipeline.Middlewares;
 ///   returns to observe the response as it streams back (here to count characters and tokens).</item>
 /// </list>
 /// </summary>
-public sealed class LoggingChatMiddleware : IChatMiddleware, IMiddlewareInfo
+public sealed partial class LoggingChatMiddleware : IChatMiddleware, IMiddlewareInfo
 {
     public string Name => "Logging";
 
@@ -29,9 +29,7 @@ public sealed class LoggingChatMiddleware : IChatMiddleware, IMiddlewareInfo
     public async Task InvokeAsync(ChatPipelineContext context, ChatMiddlewareDelegate next)
     {
         var messageCount = (context.UpstreamRequest["messages"] as JsonArray)?.Count ?? 0;
-        context.Logger.LogInformation(
-            "Chat request: surface={Surface} model={Model} stream={Stream} messages={MessageCount}",
-            context.Surface, context.Model, context.IsStreaming, messageCount);
+        LogChatRequest(context.Logger, context.Surface, context.Model, context.IsStreaming, messageCount);
 
         var stopwatch = Stopwatch.StartNew();
 
@@ -99,8 +97,33 @@ public sealed class LoggingChatMiddleware : IChatMiddleware, IMiddlewareInfo
             contextUsage = "?";
         }
 
-        context.Logger.LogInformation(
-            "Chat response: model={Model} chars={Characters} promptTokens={PromptTokens} contextUsage={ContextUsage} completionTokens={CompletionTokens} finish={Finish} elapsedMs={Elapsed}",
-            context.Model, characters, promptTokens, contextUsage, completionTokens, finishReason ?? "?", stopwatch.ElapsedMilliseconds);
+        LogChatResponse(
+            context.Logger, context.Model, characters, promptTokens, contextUsage,
+            completionTokens, finishReason ?? "?", stopwatch.ElapsedMilliseconds);
     }
+
+    // ----------------------------------------------------------------------
+    // Structured logging (source-generated)
+    // ----------------------------------------------------------------------
+
+    [LoggerMessage(
+        Level = LogLevel.Information,
+        Message = "Chat request: surface={Surface} model={Model} stream={Stream} messages={MessageCount}")]
+    private static partial void LogChatRequest(
+        ILogger logger, ClientSurface surface, string model, bool stream, int messageCount);
+
+    [LoggerMessage(
+        Level = LogLevel.Information,
+        Message = "Chat response: model={Model} chars={Characters} promptTokens={PromptTokens} " +
+                  "contextUsage={ContextUsage} completionTokens={CompletionTokens} finish={Finish} " +
+                  "elapsedMs={Elapsed}")]
+    private static partial void LogChatResponse(
+        ILogger logger,
+        string model,
+        int characters,
+        int? promptTokens,
+        string contextUsage,
+        int? completionTokens,
+        string finish,
+        long elapsed);
 }

@@ -23,7 +23,7 @@ namespace AiProxy.Pipeline.Middlewares;
 /// The middleware is fail-open: any error (or a missing/misconfigured provider) leaves the
 /// original content untouched.
 /// </summary>
-public sealed class CavemanMiddleware : IChatMiddleware, IStartupModelValidator, IMiddlewareInfo
+public sealed partial class CavemanMiddleware : IChatMiddleware, IStartupModelValidator, IMiddlewareInfo
 {
     private readonly ICavemanTransformer _transformer;
     private readonly IOptions<AiProxyOptions> _options;
@@ -170,9 +170,7 @@ public sealed class CavemanMiddleware : IChatMiddleware, IStartupModelValidator,
 
         if (totalSaved > 0)
         {
-            context.Logger.LogInformation(
-                "Caveman: compressed {Blocks} message block(s), saved {SavedChars} chars before upstream.",
-                compressedCount, totalSaved);
+            LogCompressed(context.Logger, compressedCount, totalSaved);
         }
     }
 
@@ -244,9 +242,7 @@ public sealed class CavemanMiddleware : IChatMiddleware, IStartupModelValidator,
             yield break;
         }
 
-        context.Logger.LogInformation(
-            "Caveman: expanded assistant response from {Compressed} to {Expanded} chars.",
-            fullText.Length, expanded.Length);
+        LogExpanded(context.Logger, fullText.Length, expanded.Length);
 
         // Emit the expanded text as a single content chunk, then replay the terminal signals
         // (finish reason + usage) so downstream surfaces still see completion metadata.
@@ -267,4 +263,18 @@ public sealed class CavemanMiddleware : IChatMiddleware, IStartupModelValidator,
             }
         }
     }
+
+    // ----------------------------------------------------------------------
+    // Structured logging (source-generated)
+    // ----------------------------------------------------------------------
+
+    [LoggerMessage(
+        Level = LogLevel.Information,
+        Message = "Caveman: compressed {Blocks} message block(s), saved {SavedChars} chars before upstream.")]
+    private static partial void LogCompressed(ILogger logger, int blocks, int savedChars);
+
+    [LoggerMessage(
+        Level = LogLevel.Information,
+        Message = "Caveman: expanded assistant response from {Compressed} to {Expanded} chars.")]
+    private static partial void LogExpanded(ILogger logger, int compressed, int expanded);
 }

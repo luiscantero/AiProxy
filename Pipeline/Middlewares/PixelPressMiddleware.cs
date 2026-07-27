@@ -17,7 +17,7 @@ namespace AiProxy.Pipeline.Middlewares;
 /// is disabled by default and enabled via <see cref="PixelPressOptions.Enabled"/>. It is fail-open:
 /// any rendering error leaves the request untouched.
 /// </summary>
-public sealed class PixelPressMiddleware : IChatMiddleware, IMiddlewareInfo
+public sealed partial class PixelPressMiddleware : IChatMiddleware, IMiddlewareInfo
 {
     private const string HintText =
         "The following image contains text rendered as pixels to save tokens. " +
@@ -52,7 +52,7 @@ public sealed class PixelPressMiddleware : IChatMiddleware, IMiddlewareInfo
             }
             catch (Exception ex)
             {
-                context.Logger.LogDebug(ex, "PixelPress: rendering failed; request left unchanged.");
+                LogRenderFailed(context.Logger, ex);
             }
         }
 
@@ -142,9 +142,7 @@ public sealed class PixelPressMiddleware : IChatMiddleware, IMiddlewareInfo
 
         if (renderedBlocks > 0)
         {
-            context.Logger.LogInformation(
-                "PixelPress: rendered {Blocks} text block(s) ({Chars} chars) to PNG before upstream.",
-                renderedBlocks, renderedChars);
+            LogRendered(context.Logger, renderedBlocks, renderedChars);
         }
     }
 
@@ -243,4 +241,18 @@ public sealed class PixelPressMiddleware : IChatMiddleware, IMiddlewareInfo
 
         return result;
     }
+
+    // ----------------------------------------------------------------------
+    // Structured logging (source-generated)
+    // ----------------------------------------------------------------------
+
+    [LoggerMessage(
+        Level = LogLevel.Debug,
+        Message = "PixelPress: rendering failed; request left unchanged.")]
+    private static partial void LogRenderFailed(ILogger logger, Exception exception);
+
+    [LoggerMessage(
+        Level = LogLevel.Information,
+        Message = "PixelPress: rendered {Blocks} text block(s) ({Chars} chars) to PNG before upstream.")]
+    private static partial void LogRendered(ILogger logger, int blocks, int chars);
 }

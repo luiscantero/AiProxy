@@ -8,7 +8,7 @@ namespace AiProxy.Auth.Copilot;
 /// <summary>
 /// Implements the GitHub OAuth Device Flow for Copilot.
 /// </summary>
-public sealed class DeviceFlowClient
+public sealed partial class DeviceFlowClient
 {
     private const string DeviceCodeUrl = "https://github.com/login/device/code";
     private const string AccessTokenUrl = "https://github.com/login/oauth/access_token";
@@ -81,7 +81,7 @@ public sealed class DeviceFlowClient
                     break;
                 case "slow_down":
                     interval += TimeSpan.FromSeconds(5);
-                    _logger.LogDebug("Device-flow slow_down received; new interval {Interval}s", interval.TotalSeconds);
+                    LogSlowDown(_logger, interval.TotalSeconds);
                     break;
                 case "expired_token":
                 case "access_denied":
@@ -107,4 +107,13 @@ public sealed class DeviceFlowClient
         [property: JsonPropertyName("scope")] string? Scope,
         [property: JsonPropertyName("error")] string? Error,
         [property: JsonPropertyName("error_description")] string? ErrorDescription);
+
+    // ----------------------------------------------------------------------
+    // Structured logging (source-generated)
+    // ----------------------------------------------------------------------
+
+    [LoggerMessage(
+        Level = LogLevel.Debug,
+        Message = "Device-flow slow_down received; new interval {Interval}s")]
+    private static partial void LogSlowDown(ILogger logger, double interval);
 }

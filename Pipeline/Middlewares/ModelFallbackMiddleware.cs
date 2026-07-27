@@ -30,7 +30,7 @@ namespace AiProxy.Pipeline.Middlewares;
 /// outer prompt-transform middlewares run only once; each fallback attempt simply re-sends the
 /// already-transformed request with a different model id.
 /// </summary>
-public sealed class ModelFallbackMiddleware : IChatMiddleware, IStartupModelValidator, IMiddlewareInfo
+public sealed partial class ModelFallbackMiddleware : IChatMiddleware, IStartupModelValidator, IMiddlewareInfo
 {
     private readonly IOptions<AiProxyOptions> _options;
     private readonly IEnumerable<IAuthProvider> _providers;
@@ -116,9 +116,7 @@ public sealed class ModelFallbackMiddleware : IChatMiddleware, IStartupModelVali
 
                 if (provider is null)
                 {
-                    context.Logger.LogWarning(
-                        "Fallback model {Model} is not exposed by any connected provider; skipping it.",
-                        candidate);
+                    LogFallbackModelUnavailable(context.Logger, candidate);
                     continue;
                 }
 
@@ -126,9 +124,7 @@ public sealed class ModelFallbackMiddleware : IChatMiddleware, IStartupModelVali
                 context.Model = candidate;
                 context.UpstreamRequest["model"] = candidate;
 
-                context.Logger.LogWarning(
-                    "Falling back to model {Model} (priority {Priority} of {Total}).",
-                    candidate, i + 1, chain.Count);
+                LogFallingBack(context.Logger, candidate, i + 1, chain.Count);
             }
 
             attempted = true;
@@ -138,23 +134,19 @@ public sealed class ModelFallbackMiddleware : IChatMiddleware, IStartupModelVali
                 await next(context).ConfigureAwait(false);
                 if (i > 0)
                 {
-                    context.Logger.LogInformation("Fallback model {Model} served the request.", candidate);
+                    LogFallbackServed(context.Logger, candidate);
                 }
                 return;
             }
             catch (UpstreamException ex) when (retryStatusCodes.Contains(ex.StatusCode))
             {
                 lastError = ex;
-                context.Logger.LogWarning(
-                    "Model {Model} returned retryable status {Status}; trying the next fallback.",
-                    candidate, ex.StatusCode);
+                LogRetryableStatus(context.Logger, candidate, ex.StatusCode);
             }
             catch (HttpRequestException ex)
             {
                 // A transport-level failure (DNS, connection reset, timeout) is always retryable.
-                context.Logger.LogWarning(
-                    ex, "Model {Model} request failed at the transport level; trying the next fallback.",
-                    candidate);
+                LogTransportFailure(context.Logger, ex, candidate);
             }
         }
 
@@ -190,4 +182,33 @@ public sealed class ModelFallbackMiddleware : IChatMiddleware, IStartupModelVali
 
         return null;
     }
+
+    // ----------------------------------------------------------------------
+    // Structured logging (source-generated)
+    // ----------------------------------------------------------------------
+
+    [LoggerMessage(
+        Level = LogLevel.Warning,
+        Message = "Fallback model {Model} is not exposed by any connected provider; skipping it.")]
+    private static partial void LogFallbackModelUnavailable(ILogger logger, string model);
+
+    [LoggerMessage(
+        Level = LogLevel.Warning,
+        Message = "Falling back to model {Model} (priority {Priority} of {Total}).")]
+    private static partial void LogFallingBack(ILogger logger, string model, int priority, int total);
+
+    [LoggerMessage(
+        Level = LogLevel.Information,
+        Message = "Fallback model {Model} served the request.")]
+    private static partial void LogFallbackServed(ILogger logger, string model);
+
+    [LoggerMessage(
+        Level = LogLevel.Warning,
+        Message = "Model {Model} returned retryable status {Status}; trying the next fallback.")]
+    private static partial void LogRetryableStatus(ILogger logger, string model, int status);
+
+    [LoggerMessage(
+        Level = LogLevel.Warning,
+        Message = "Model {Model} request failed at the transport level; trying the next fallback.")]
+    private static partial void LogTransportFailure(ILogger logger, Exception exception, string model);
 }

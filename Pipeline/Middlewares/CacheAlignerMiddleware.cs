@@ -13,7 +13,7 @@ namespace AiProxy.Pipeline.Middlewares;
 /// It operates inbound only and only on system messages — user/assistant/tool content is left
 /// untouched so real conversation data is never corrupted. It is fail-open.
 /// </summary>
-public sealed class CacheAlignerMiddleware : IChatMiddleware, IMiddlewareInfo
+public sealed partial class CacheAlignerMiddleware : IChatMiddleware, IMiddlewareInfo
 {
     public string Name => "CacheAligner";
 
@@ -57,7 +57,7 @@ public sealed class CacheAlignerMiddleware : IChatMiddleware, IMiddlewareInfo
         }
         catch (Exception ex)
         {
-            context.Logger.LogDebug(ex, "CacheAligner encountered an error; request left unchanged.");
+            LogAlignFailed(context.Logger, ex);
         }
 
         await next(context).ConfigureAwait(false);
@@ -84,9 +84,7 @@ public sealed class CacheAlignerMiddleware : IChatMiddleware, IMiddlewareInfo
 
         if (totalReplacements > 0)
         {
-            context.Logger.LogInformation(
-                "CacheAligner: stabilized {Count} volatile token(s) in system prompt for cache reuse.",
-                totalReplacements);
+            LogStabilized(context.Logger, totalReplacements);
         }
     }
 
@@ -158,4 +156,18 @@ public sealed class CacheAlignerMiddleware : IChatMiddleware, IMiddlewareInfo
             return input;
         }
     }
+
+    // ----------------------------------------------------------------------
+    // Structured logging (source-generated)
+    // ----------------------------------------------------------------------
+
+    [LoggerMessage(
+        Level = LogLevel.Debug,
+        Message = "CacheAligner encountered an error; request left unchanged.")]
+    private static partial void LogAlignFailed(ILogger logger, Exception exception);
+
+    [LoggerMessage(
+        Level = LogLevel.Information,
+        Message = "CacheAligner: stabilized {Count} volatile token(s) in system prompt for cache reuse.")]
+    private static partial void LogStabilized(ILogger logger, int count);
 }

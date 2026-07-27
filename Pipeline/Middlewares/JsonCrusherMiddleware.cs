@@ -14,7 +14,7 @@ namespace AiProxy.Pipeline.Middlewares;
 /// re-serialized compactly with <see cref="System.Text.Json"/>, so no keys, nulls, or values are
 /// dropped. It is fail-open — any unexpected error leaves the request untouched.
 /// </summary>
-public sealed class JsonCrusherMiddleware : IChatMiddleware, IMiddlewareInfo
+public sealed partial class JsonCrusherMiddleware : IChatMiddleware, IMiddlewareInfo
 {
     public string Name => "JsonCrusher";
 
@@ -77,17 +77,12 @@ public sealed class JsonCrusherMiddleware : IChatMiddleware, IMiddlewareInfo
 
             if (savedChars > 0)
             {
-                context.Logger.LogInformation(
-                    "JsonCrusher: compacted embedded JSON, saved {SavedChars} chars across {Messages} messages.",
-                    savedChars,
-                    messageCount);
+                LogCompacted(context.Logger, savedChars, messageCount);
             }
         }
         catch (Exception ex)
         {
-            context.Logger.LogDebug(
-                ex,
-                "JsonCrusher encountered an unexpected exception; proceeding with unchanged request.");
+            LogCrushFailed(context.Logger, ex);
         }
 
         await next(context).ConfigureAwait(false);
@@ -221,4 +216,18 @@ public sealed class JsonCrusherMiddleware : IChatMiddleware, IMiddlewareInfo
 
         return (content.Length, null);
     }
+
+    // ----------------------------------------------------------------------
+    // Structured logging (source-generated)
+    // ----------------------------------------------------------------------
+
+    [LoggerMessage(
+        Level = LogLevel.Information,
+        Message = "JsonCrusher: compacted embedded JSON, saved {SavedChars} chars across {Messages} messages.")]
+    private static partial void LogCompacted(ILogger logger, int savedChars, int messages);
+
+    [LoggerMessage(
+        Level = LogLevel.Debug,
+        Message = "JsonCrusher encountered an unexpected exception; proceeding with unchanged request.")]
+    private static partial void LogCrushFailed(ILogger logger, Exception exception);
 }

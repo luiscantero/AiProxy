@@ -15,7 +15,7 @@ namespace AiProxy.Proxy;
 /// VS Code provider we can target without shipping an extension. We emulate just enough of
 /// the Ollama wire protocol for VS Code to discover models and run streaming chat.
 /// </summary>
-public static class OllamaEndpoints
+public static partial class OllamaEndpoints
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
@@ -246,13 +246,13 @@ public static class OllamaEndpoints
         }
         catch (UpstreamException ex)
         {
-            logger.LogWarning("Upstream returned {Status}: {Body}", ex.StatusCode, ex.Body);
+            LogUpstreamStatus(logger, ex.StatusCode, ex.Body);
             await WriteJsonErrorAsync(context, ex.StatusCode, ex.Body);
             return;
         }
         catch (HttpRequestException ex)
         {
-            logger.LogWarning(ex, "Upstream request failed.");
+            LogUpstreamRequestFailed(logger, ex);
             await WriteJsonErrorAsync(context, 502, $"Upstream error: {ex.Message}");
             return;
         }
@@ -682,4 +682,18 @@ public static class OllamaEndpoints
 
         public string[]? Stop { get; set; }
     }
+
+    // ----------------------------------------------------------------------
+    // Structured logging (source-generated)
+    // ----------------------------------------------------------------------
+
+    [LoggerMessage(
+        Level = LogLevel.Warning,
+        Message = "Upstream returned {Status}: {Body}")]
+    private static partial void LogUpstreamStatus(ILogger logger, int status, string body);
+
+    [LoggerMessage(
+        Level = LogLevel.Warning,
+        Message = "Upstream request failed.")]
+    private static partial void LogUpstreamRequestFailed(ILogger logger, Exception exception);
 }

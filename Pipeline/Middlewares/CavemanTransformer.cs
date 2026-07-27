@@ -37,7 +37,7 @@ public interface ICavemanTransformer
 /// <c>/chat/completions</c> call whose system prompt encodes the caveman rules. Because the
 /// transform is just another OpenAI-shaped chat call, any registered provider can drive it.
 /// </summary>
-public sealed class CavemanTransformer : ICavemanTransformer
+public sealed partial class CavemanTransformer : ICavemanTransformer
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
@@ -72,15 +72,13 @@ public sealed class CavemanTransformer : ICavemanTransformer
             p => p.Name.Equals(cfg.Provider, StringComparison.OrdinalIgnoreCase));
         if (provider is null)
         {
-            logger.LogWarning(
-                "Caveman: configured provider '{Provider}' is not registered; skipping transform.",
-                cfg.Provider);
+            LogProviderNotRegistered(logger, cfg.Provider);
             return null;
         }
 
         if (string.IsNullOrWhiteSpace(cfg.Model))
         {
-            logger.LogWarning("Caveman: no model configured; skipping transform.");
+            LogNoModelConfigured(logger);
             return null;
         }
 
@@ -89,9 +87,7 @@ public sealed class CavemanTransformer : ICavemanTransformer
             var baseUrl = await provider.GetUpstreamApiBaseUrlAsync(cancellationToken).ConfigureAwait(false);
             if (string.IsNullOrWhiteSpace(baseUrl))
             {
-                logger.LogWarning(
-                    "Caveman: provider '{Provider}' has no base URL; run 'AiProxy connect {Provider}'.",
-                    cfg.Provider, cfg.Provider);
+                LogProviderHasNoBaseUrl(logger, cfg.Provider);
                 return null;
             }
 
@@ -128,9 +124,7 @@ public sealed class CavemanTransformer : ICavemanTransformer
             if (!response.IsSuccessStatusCode)
             {
                 var error = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
-                logger.LogDebug(
-                    "Caveman: transform call failed ({Status}); using original text. Body: {Body}",
-                    (int)response.StatusCode, error);
+                LogTransformCallFailed(logger, (int)response.StatusCode, error);
                 return null;
             }
 
@@ -140,7 +134,7 @@ public sealed class CavemanTransformer : ICavemanTransformer
             var content = ExtractContent(doc.RootElement);
             if (string.IsNullOrWhiteSpace(content))
             {
-                logger.LogDebug("Caveman: transform returned empty content; using original text.");
+                LogTransformReturnedEmpty(logger);
                 return null;
             }
 
@@ -152,7 +146,7 @@ public sealed class CavemanTransformer : ICavemanTransformer
         }
         catch (Exception ex)
         {
-            logger.LogDebug(ex, "Caveman: transform threw; using original text.");
+            LogTransformThrew(logger, ex);
             return null;
         }
     }
@@ -212,4 +206,38 @@ public sealed class CavemanTransformer : ICavemanTransformer
 
         Output ONLY the expanded text. No preamble, no explanation, no code fences.
         """;
+
+    // ----------------------------------------------------------------------
+    // Structured logging (source-generated)
+    // ----------------------------------------------------------------------
+
+    [LoggerMessage(
+        Level = LogLevel.Warning,
+        Message = "Caveman: configured provider '{Provider}' is not registered; skipping transform.")]
+    private static partial void LogProviderNotRegistered(ILogger logger, string provider);
+
+    [LoggerMessage(
+        Level = LogLevel.Warning,
+        Message = "Caveman: no model configured; skipping transform.")]
+    private static partial void LogNoModelConfigured(ILogger logger);
+
+    [LoggerMessage(
+        Level = LogLevel.Warning,
+        Message = "Caveman: provider '{Provider}' has no base URL; run 'AiProxy connect' for that provider.")]
+    private static partial void LogProviderHasNoBaseUrl(ILogger logger, string provider);
+
+    [LoggerMessage(
+        Level = LogLevel.Debug,
+        Message = "Caveman: transform call failed ({Status}); using original text. Body: {Body}")]
+    private static partial void LogTransformCallFailed(ILogger logger, int status, string body);
+
+    [LoggerMessage(
+        Level = LogLevel.Debug,
+        Message = "Caveman: transform returned empty content; using original text.")]
+    private static partial void LogTransformReturnedEmpty(ILogger logger);
+
+    [LoggerMessage(
+        Level = LogLevel.Debug,
+        Message = "Caveman: transform threw; using original text.")]
+    private static partial void LogTransformThrew(ILogger logger, Exception exception);
 }
