@@ -29,7 +29,7 @@ editors, or scripts at `http://localhost:11434` and bring your own AI models.
   of alternative models on outages, rate limits, or transient errors. *Ride out
   a provider outage by failing over from one vendor to another mid-request.*
 - **Gearbox / model shifter** — Bind models to gear positions and shift the whole
-  proxy onto one from a small browser UI. *Flip every request between Haiku, Opus,
+  proxy onto one from a small browser UI. *Flip every request between Sonnet, Opus,
   Sol, or Neutral with a click — no editor round-trip.*
 - **Extensible by design** — Drop in your own ASP.NET-style middleware to
   transform requests and responses. *Add custom logging, redaction, or prompt

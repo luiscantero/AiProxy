@@ -219,7 +219,7 @@ public sealed class GearOptions
     /// <summary>Short position label shown on the shifter, e.g. "1", "2", ... "R".</summary>
     public string Position { get; set; } = "";
 
-    /// <summary>Human-friendly name for the gear, e.g. "Haiku" or "Opus". Optional.</summary>
+    /// <summary>Human-friendly name for the gear, e.g. "Sonnet" or "Opus". Optional.</summary>
     public string Label { get; set; } = "";
 
     /// <summary>
