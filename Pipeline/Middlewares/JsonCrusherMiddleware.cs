@@ -22,7 +22,7 @@ public sealed class JsonCrusherMiddleware : IChatMiddleware, IMiddlewareInfo
 
     public string Description =>
         "Minifies JSON embedded in prompt messages (tool output, API responses) without " +
-        "dropping any data. Always on; nothing to configure.";
+        "dropping any data. Always on.";
 
     public async Task InvokeAsync(ChatPipelineContext context, ChatMiddlewareDelegate next)
     {

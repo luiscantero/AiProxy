@@ -21,8 +21,7 @@ public sealed class CacheAlignerMiddleware : IChatMiddleware, IMiddlewareInfo
 
     public string Description =>
         "Replaces volatile tokens (dates, timestamps, UUIDs, session ids) in system prompts " +
-        "with fixed placeholders so the provider prompt cache keeps hitting. Always on; " +
-        "nothing to configure.";
+        "with fixed placeholders so the provider prompt cache keeps hitting. Always on.";
 
     private static readonly TimeSpan RegexTimeout = TimeSpan.FromMilliseconds(250);
 
