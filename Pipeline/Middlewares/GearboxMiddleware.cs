@@ -53,10 +53,12 @@ public sealed partial class GearboxMiddleware : IChatMiddleware, IStartupModelVa
 
     /// <summary>
     /// Checks every gear with a configured model against the models exposed by connected
-    /// providers. If any gear points at a model nothing exposes, Gearbox is disabled for this
-    /// run (fail-safe) and a single problem listing every bad gear is returned for a startup
-    /// warning. When the configuration is valid, the gear engaged at startup (and the model it
-    /// routes to) is logged so the active selection is visible from the very first line.
+    /// providers. A gear pointing at a model nothing exposes is <b>removed from the shifter</b>
+    /// rather than switching the whole gearbox off, so one retired model id costs you one gear
+    /// instead of the feature; the removed gears are still reported for a startup warning. Gearbox
+    /// only disables itself when no gear with a model is left. When the configuration is valid, the
+    /// gear engaged at startup (and the model it routes to) is logged so the active selection is
+    /// visible from the very first line.
     /// </summary>
     public IReadOnlyList<string> ValidateModels(IReadOnlyList<ProviderResolver.ProviderModels> providerModels)
     {
@@ -70,18 +72,26 @@ public sealed partial class GearboxMiddleware : IChatMiddleware, IStartupModelVa
             providerModels.SelectMany(pm => pm.Models), StringComparer.OrdinalIgnoreCase);
 
         var unknown = new List<string>();
-        foreach (var gear in gearbox.Gears)
+
+        // Walk backwards so removing a gear does not shift the indices still to be checked.
+        for (var i = gearbox.Gears.Count - 1; i >= 0; i--)
         {
-            if (string.IsNullOrWhiteSpace(gear.Model))
+            var gear = gearbox.Gears[i];
+            if (string.IsNullOrWhiteSpace(gear.Model) || available.Contains(gear.Model))
             {
-                // Pass-through gear; nothing to validate.
+                // Pass-through gear, or one that resolves: nothing to do.
                 continue;
             }
 
-            if (!available.Contains(gear.Model))
+            var label = string.IsNullOrWhiteSpace(gear.Label) ? gear.Position : gear.Label;
+            unknown.Add($"'{gear.Position}' ({label}) -> {gear.Model}");
+            gearbox.Gears.RemoveAt(i);
+
+            if (string.Equals(gear.Position, _state.Selected, StringComparison.OrdinalIgnoreCase))
             {
-                var label = string.IsNullOrWhiteSpace(gear.Label) ? gear.Position : gear.Label;
-                unknown.Add($"'{gear.Position}' ({label}) -> {gear.Model}");
+                // The gear we were about to start in just disappeared; coast in Neutral instead of
+                // reporting a position the shifter no longer has.
+                _state.Selected = GearboxState.Neutral;
             }
         }
 
@@ -91,8 +101,22 @@ public sealed partial class GearboxMiddleware : IChatMiddleware, IStartupModelVa
             return Array.Empty<string>();
         }
 
-        gearbox.Enabled = false;
-        return new[] { $"Gearbox gears: {string.Join(", ", unknown)}" };
+        // Report in configuration order rather than the reverse order they were removed in.
+        unknown.Reverse();
+        var problems = new[]
+        {
+            $"Gearbox gears: {string.Join(", ", unknown)} (removed from the shifter)"
+        };
+
+        if (!gearbox.Gears.Any(g => !string.IsNullOrWhiteSpace(g.Model)))
+        {
+            // Every gear that could route somewhere is gone; there is nothing left to shift into.
+            gearbox.Enabled = false;
+            return problems;
+        }
+
+        LogStartupSelection(_logger, DescribeSelection(gearbox, _state));
+        return problems;
     }
 
     /// <summary>

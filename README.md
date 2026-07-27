@@ -387,7 +387,9 @@ engaged — no matter which model the client (e.g. VS Code) actually asked for.
 - Engaging a gear swaps the request's model **and** re-resolves the owning
   provider, so a gear can point at a model on *any* connected provider.
 - It is **fail-open**: if the engaged gear names a model no connected provider
-  exposes, the request is left on its original model instead of failing.
+  exposes, the request is left on its original model instead of failing. Such a
+  gear is dropped from the shifter at startup (see below), so this only happens
+  if a model disappears while the proxy is running.
 - It runs near the top of the pipeline (just after logging), so the chosen model
   flows through the rest of the transforms and the fallback stage.
 
@@ -428,12 +430,17 @@ model, a provider that isn't connected, ...) the proxy prints a friendly
 `WARNING` with details and degrades that middleware for the run — the rest of the
 pipeline (and the proxy itself) starts normally.
 
-How far it degrades is up to the middleware. Caveman and Gearbox **disable
-themselves**, because a single bad id makes them ambiguous. Model fallback only
-**prunes** the offending id out of its chain, so one retired model can't take
-failover down with it; it disables itself only when nothing usable is left at all
-— which, with `Mode: "Auto"`, cannot happen, since Auto never names a model in
-configuration in the first place.
+How far it degrades is up to the middleware, and none of them take the whole
+feature down over a single bad id any more:
+
+- **Model fallback** *prunes* the offending id out of its chain. It disables
+  itself only when nothing usable is left at all — which, with `Mode: "Auto"`,
+  cannot happen, since Auto never names a model in configuration.
+- **Gearbox** *removes* the offending gear from the shifter (and returns to
+  Neutral if that gear was the one engaged). It disables itself only when no gear
+  with a model survives.
+- **Caveman** disables itself, since it has exactly one model to compress with and
+  no meaningful way to carry on without it.
 
 #### Ideas for future middlewares
 

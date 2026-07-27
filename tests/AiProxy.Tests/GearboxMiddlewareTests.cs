@@ -206,12 +206,43 @@ public class GearboxMiddlewareTests
     }
 
     [Fact]
-    public void ValidateModels_disables_gearbox_and_reports_problem_for_unknown_model()
+    public void ValidateModels_removes_the_unknown_gear_but_keeps_gearbox_enabled()
     {
         var gearbox = new GearboxOptions
         {
             Enabled = true,
-            Gears = { new GearOptions { Position = "1", Label = "Haiku", Model = "gpt-5.6-luna" } },
+            Gears =
+            {
+                new GearOptions { Position = "1", Label = "Haiku", Model = "gpt-5.6-luna" },
+                new GearOptions { Position = "2", Label = "Sonnet", Model = "sonnet" },
+            },
+        };
+        var middleware = Middleware(gearbox, StateFor(gearbox));
+        var providerModels = new[]
+        {
+            new ProviderResolver.ProviderModels(new StubProvider("sonnet"), new[] { "sonnet" }),
+        };
+
+        var problems = middleware.ValidateModels(providerModels);
+
+        gearbox.Enabled.Should().BeTrue();
+        gearbox.Gears.Select(g => g.Position).Should().Equal("2");
+        var problem = problems.Should().ContainSingle().Which;
+        problem.Should().Contain("gpt-5.6-luna");
+        problem.Should().Contain("Haiku");
+    }
+
+    [Fact]
+    public void ValidateModels_disables_gearbox_when_no_gear_with_a_model_survives()
+    {
+        var gearbox = new GearboxOptions
+        {
+            Enabled = true,
+            Gears =
+            {
+                new GearOptions { Position = "1", Label = "Haiku", Model = "gpt-5.6-luna" },
+                new GearOptions { Position = "R", Label = "Default", Model = "" },
+            },
         };
         var middleware = Middleware(gearbox, StateFor(gearbox));
         var providerModels = new[]
@@ -222,9 +253,32 @@ public class GearboxMiddlewareTests
         var problems = middleware.ValidateModels(providerModels);
 
         gearbox.Enabled.Should().BeFalse();
-        var problem = problems.Should().ContainSingle().Which;
-        problem.Should().Contain("gpt-5.6-luna");
-        problem.Should().Contain("Haiku");
+        problems.Should().ContainSingle().Which.Should().Contain("gpt-5.6-luna");
+    }
+
+    [Fact]
+    public void ValidateModels_returns_to_neutral_when_the_engaged_gear_is_removed()
+    {
+        var gearbox = new GearboxOptions
+        {
+            Enabled = true,
+            Selected = "1",
+            Gears =
+            {
+                new GearOptions { Position = "1", Label = "Haiku", Model = "gpt-5.6-luna" },
+                new GearOptions { Position = "2", Label = "Sonnet", Model = "sonnet" },
+            },
+        };
+        var state = StateFor(gearbox);
+        var middleware = Middleware(gearbox, state);
+        var providerModels = new[]
+        {
+            new ProviderResolver.ProviderModels(new StubProvider("sonnet"), new[] { "sonnet" }),
+        };
+
+        middleware.ValidateModels(providerModels);
+
+        state.IsNeutral.Should().BeTrue();
     }
 
     private sealed class StubProvider : IAuthProvider
