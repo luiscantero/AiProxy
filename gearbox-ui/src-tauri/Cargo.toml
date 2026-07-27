@@ -1,0 +1,23 @@
+[package]
+name = "gearbox-ui"
+version = "0.1.0"
+description = "Tiny desktop shifter for the AiProxy gearbox middleware"
+edition = "2021"
+rust-version = "1.77.2"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# Loopback-only client: no TLS features, so the binary stays small and links no crypto stack.
+reqwest = { version = "0.12", default-features = false, features = ["json"] }
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

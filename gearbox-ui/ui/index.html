@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Gearbox</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <main class="box">
+    <header class="head">
+      <span>Model Shift</span>
+      <div class="tools">
+        <button id="pin" class="tool" type="button" title="Keep on top">PIN</button>
+        <button id="settings-toggle" class="tool" type="button" title="Proxy address">URL</button>
+        <span id="dot" class="dot"></span>
+      </div>
+    </header>
+
+    <form id="settings" class="settings" hidden>
+      <label class="settings-label" for="base-url">Proxy address</label>
+      <div class="settings-row">
+        <input id="base-url" class="input" type="text" spellcheck="false" placeholder="http://localhost:11434" />
+        <button class="save" type="submit">Save</button>
+      </div>
+    </form>
+
+    <div id="app"></div>
+    <p class="foot" id="foot">connecting…</p>
+  </main>
+
+  <script src="main.js"></script>
+</body>
+</html>

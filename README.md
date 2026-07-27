@@ -410,6 +410,10 @@ which are only mapped when the gearbox is enabled. Because the engaged gear is
 in-memory runtime state, shifting takes effect on the *next* request and resets
 to `Selected` when the proxy restarts.
 
+Prefer a window over a browser tab? [gearbox-ui](gearbox-ui/README.md) is a small
+Rust/Tauri desktop shifter that drives the same two routes, with a pin-on-top
+button and number-key shortcuts.
+
 Opt-in via `Gearbox.Enabled`:
 
 ```jsonc
