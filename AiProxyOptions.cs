@@ -151,7 +151,7 @@ public sealed class PixelPressOptions
 /// <summary>
 /// Configuration for the model fallback middleware. When a request to a primary model fails with
 /// a retryable upstream error (outage, rate limit, 5xx), the middleware re-issues the same request
-/// against the next model in a prioritized list — transparently to the client. Disabled by default.
+/// against an alternative model — transparently to the client. Disabled by default.
 /// </summary>
 public sealed class FallbackOptions
 {
@@ -159,10 +159,30 @@ public sealed class FallbackOptions
     public bool Enabled { get; set; }
 
     /// <summary>
-    /// Ordered fallback chains. Each chain lists models in priority order: the first entry is the
-    /// model a client requests, and the remaining entries are the alternatives to try, in order,
-    /// when an attempt fails. A fallback model may live on a different provider; it is resolved the
-    /// same way a directly-requested model is.
+    /// How alternatives are chosen for a model that has no explicit <see cref="Chains"/> entry.
+    /// Defaults to <see cref="FallbackMode.Auto"/>, which needs no model ids in configuration at all.
+    /// </summary>
+    public FallbackMode Mode { get; set; } = FallbackMode.Auto;
+
+    /// <summary>
+    /// Maximum number of alternatives tried in <see cref="FallbackMode.Auto"/> mode (the primary
+    /// attempt is not counted). Keeps a bad outage from walking the entire model catalog.
+    /// </summary>
+    public int MaxCandidates { get; set; } = 2;
+
+    /// <summary>
+    /// Models that <see cref="FallbackMode.Auto"/> must never fail over onto — typically the
+    /// expensive ones you only want to use when you ask for them explicitly. Ignored by
+    /// <see cref="Chains"/>, which is always taken at face value.
+    /// </summary>
+    public List<string> Exclude { get; set; } = new();
+
+    /// <summary>
+    /// Optional explicit overrides. Each chain lists models in priority order: the first entry is
+    /// the model a client requests, and the remaining entries are the alternatives to try, in
+    /// order, when an attempt fails. A chain wins over <see cref="FallbackMode.Auto"/> for its
+    /// primary model. A fallback model may live on a different provider; it is resolved the same
+    /// way a directly-requested model is.
     /// </summary>
     public List<FallbackChain> Chains { get; set; } = new();
 
@@ -171,6 +191,25 @@ public sealed class FallbackOptions
     /// malformed request) is returned to the client unchanged. Defaults to 429 and 5xx.
     /// </summary>
     public List<int> RetryStatusCodes { get; set; } = new() { 408, 409, 429, 500, 502, 503, 504, 529 };
+}
+
+/// <summary>
+/// How the fallback middleware picks alternatives for a model without an explicit chain.
+/// </summary>
+public enum FallbackMode
+{
+    /// <summary>
+    /// Derive alternatives from the models actually connected right now, ranked by how well they
+    /// substitute for the failed one (same family, big enough context window, and the capabilities
+    /// the request needs). Requires no model ids in configuration, so it cannot go stale.
+    /// </summary>
+    Auto,
+
+    /// <summary>
+    /// Only fail over for models listed in <see cref="FallbackOptions.Chains"/>; every other model
+    /// is passed through untouched.
+    /// </summary>
+    Chains
 }
 
 /// <summary>

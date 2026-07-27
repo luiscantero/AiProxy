@@ -25,9 +25,10 @@ editors, or scripts at `http://localhost:11434` and bring your own AI models.
   go upstream (cache alignment, JSON minification, log squashing, caveman
   compression, and optional text-to-image rendering). *Cut token usage on large
   tool outputs, logs, or verbose prompts automatically.*
-- **Model fallback / failover** — Transparently retry against a prioritized list
-  of alternative models on outages, rate limits, or transient errors. *Ride out
-  a provider outage by failing over from one vendor to another mid-request.*
+- **Model fallback / failover** — Transparently retry against another model on
+  outages, rate limits, or transient errors, picked automatically from the models
+  you have connected. *Ride out a provider outage by failing over from one vendor
+  to another mid-request — with no model ids to maintain.*
 - **Gearbox / model shifter** — Bind models to gear positions and shift the whole
   proxy onto one from a small browser UI. *Flip every request between Sonnet, Opus,
   Sol, or Neutral with a click — no editor round-trip.*
@@ -216,7 +217,7 @@ unchanged, so a middleware can never break a request.
 | [JsonCrusherMiddleware](Pipeline/Middlewares/JsonCrusherMiddleware.cs)     | Losslessly **minifies embedded JSON** (tool outputs, API responses, DB rows) found inside message content. It locates balanced JSON spans, re-serializes them compactly, and only replaces a span when the result is strictly shorter. No keys, nulls, or values are dropped.                                                                                                             |
 | [LogCompressorMiddleware](Pipeline/Middlewares/LogCompressorMiddleware.cs) | **Squashes log blocks.** When content looks like logs, it collapses consecutive duplicate lines (ignoring volatile timestamps) and thins long runs of low-severity `TRACE`/`DEBUG`/`INFO` lines, while always preserving `WARN`/`ERROR`/`FATAL`/`CRITICAL` lines and stack traces.                                                                                                        |
 | [CavemanMiddleware](Pipeline/Middlewares/CavemanMiddleware.cs)             | **LLM-driven natural-language compression** (opt-in). Delegates [caveman compression](https://github.com/wilpel/caveman-compression) to a configured model (typically a local Ollama) to strip grammar/filler from prompt content while preserving facts, then optionally expands caveman replies back to fluent prose. See [Caveman compression](#caveman-compression-middleware) below. |
-| [ModelFallbackMiddleware](Pipeline/Middlewares/ModelFallbackMiddleware.cs) | **Model fallback / failover** (opt-in). When a model is unavailable (provider outage, rate limit, transient `5xx`), it transparently retries the request against a prioritized list of alternative models — which may live on different providers. See [Model fallback](#model-fallback-middleware) below.                                                                                |
+| [ModelFallbackMiddleware](Pipeline/Middlewares/ModelFallbackMiddleware.cs) | **Model fallback / failover** (opt-in). When a model is unavailable (provider outage, rate limit, transient `5xx`), it transparently retries the request against an alternative model — chosen automatically from the connected models (or from an explicit chain), and possibly on a different provider. See [Model fallback](#model-fallback-middleware) below.                          |
 | [GearboxMiddleware](Pipeline/Middlewares/GearboxMiddleware.cs)             | **Manual model shifter** (opt-in). Binds models to gear positions and re-routes *every* request to whichever gear is engaged, flipped from a small browser UI. Neutral honors the client's own model choice. See [Gearbox](#gearbox-middleware) below.                                                                                                                                  |
 | [PixelPressMiddleware](Pipeline/Middlewares/PixelPressMiddleware.cs)       | **Text-to-image token squeeze** (opt-in). Renders bulky prompt text into a dense PNG and swaps it in as an `image_url` part, so a **vision-capable** model reads it at a fixed image-token cost instead of per-character text tokens. Inspired by [pxpipe](https://github.com/teamchong/pxpipe). Lossy (the model OCRs the pixels), so off by default. See [PixelPress](#pixelpress-middleware) below. |
 
@@ -308,11 +309,30 @@ designed to ride out), rate-limits you, or returns a transient `5xx`, the
 the request alive by automatically retrying it against a **prioritized list of
 alternative models** — transparently to the client.
 
-You configure one or more *chains*. Each chain is simply an array of models in
-priority order: the **first** entry is the model a client requests, and the rest
-are the alternatives to try, in order, when an attempt fails. A fallback model
-can live on a different provider; it is resolved (and authenticated) exactly like
-a directly-requested model, so a chain can fail over from one vendor to another.
+You don't configure model ids for this. By default (`Mode: "Auto"`) the
+alternatives are **derived at runtime** from the models you actually have
+connected, so there is nothing in `appsettings.json` that can go stale when a
+model is renamed, retired, or de-selected. For a failed model, a candidate has to
+be able to serve *this* request:
+
+- the request's own requirements are honored — image parts need a vision model, a
+  `tools` array needs a tool-calling model;
+- a model whose context window is known to be **smaller** than the failed one's is
+  dropped, rather than trading an outage for a truncation error;
+- survivors are ranked by **same family** first, then by the **closest** (smallest
+  sufficient) context window, then by the order you selected them in — so failover
+  lands on the nearest equivalent, not on the biggest or priciest model you own.
+
+At most `MaxCandidates` alternatives are tried, and anything in `Exclude` is never
+chosen automatically. The catalog is only read **after** a failure, so the happy
+path costs nothing.
+
+If you'd rather pin the order for a particular model, add a *chain*: an array of
+models in priority order where the **first** entry is the model a client requests
+and the rest are the alternatives to try, in order. A chain wins over Auto for its
+primary model. A fallback model can live on a different provider; it is resolved
+(and authenticated) exactly like a directly-requested model, so failover can cross
+vendors.
 
 - The upstream call **fails fast** — the terminal invoker validates the response
   status before exposing any chunks — so a fallback happens *before* a single
@@ -320,9 +340,11 @@ a directly-requested model, so a chain can fail over from one vendor to another.
 - Only **retryable** statuses trigger a fallback (`RetryStatusCodes`, default
   `408, 409, 429, 500, 502, 503, 504, 529`) plus transport-level failures.
   Genuine client errors (e.g. a `400`) are returned unchanged, never masked.
-- If a configured fallback model isn't exposed by any connected provider it is
-  **skipped**; if every candidate fails, the **last** upstream error is surfaced
-  so the client still sees a real failure rather than an empty success.
+- If a fallback model isn't exposed by any connected provider it is **skipped**;
+  if every candidate fails, the **last** upstream error is surfaced so the client
+  still sees a real failure rather than an empty success.
+- Every switch is logged as a single `WARNING` naming the abandoned model, the
+  reason, and the model now serving the request.
 
 It runs **innermost** (closest to the upstream call), so the outer prompt
 transforms run only once; each fallback attempt just re-sends the
@@ -332,8 +354,15 @@ already-transformed request with a different model id. Opt-in via
 ```jsonc
 "Fallback": {
   "Enabled": true,
+  // "Auto" (default) picks alternatives from the connected models.
+  // "Chains" only fails over for models listed in Chains below.
+  "Mode": "Auto",
+  "MaxCandidates": 2,
+  // Never fail over onto these automatically (e.g. the expensive ones).
+  "Exclude": [ "claude-opus-5" ],
   // Upstream statuses that trigger a fallback (transport failures always do).
   "RetryStatusCodes": [ 408, 409, 429, 500, 502, 503, 504, 529 ],
+  // Optional overrides. Leave empty to rely entirely on "Auto".
   "Chains": [
     {
       // Clients request "gpt-5.6-sol"; on failure try the next, then the next.
@@ -391,14 +420,20 @@ Opt-in via `Gearbox.Enabled`:
 
 #### Startup model validation
 
-Caveman, Model fallback, and Gearbox all reference model ids in configuration.
-At startup, once the proxy has catalogued the models exposed by every connected
-provider, each enabled middleware checks its own configured model(s) against
-that catalog. If a reference doesn't resolve (a typo, a retired model, a
-provider that isn't connected, ...) the proxy prints a friendly
-`WARNING` with details and **disables that middleware** for the run — the rest
-of the pipeline (and the proxy itself) starts normally, it just runs without
-the misconfigured feature until the config is fixed and the proxy restarts.
+Caveman, Model fallback, and Gearbox can all reference model ids in
+configuration. At startup, once the proxy has catalogued the models exposed by
+every connected provider, each enabled middleware checks its own configured
+model(s) against that catalog. If a reference doesn't resolve (a typo, a retired
+model, a provider that isn't connected, ...) the proxy prints a friendly
+`WARNING` with details and degrades that middleware for the run — the rest of the
+pipeline (and the proxy itself) starts normally.
+
+How far it degrades is up to the middleware. Caveman and Gearbox **disable
+themselves**, because a single bad id makes them ambiguous. Model fallback only
+**prunes** the offending id out of its chain, so one retired model can't take
+failover down with it; it disables itself only when nothing usable is left at all
+— which, with `Mode: "Auto"`, cannot happen, since Auto never names a model in
+configuration in the first place.
 
 #### Ideas for future middlewares
 

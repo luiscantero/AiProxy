@@ -19,20 +19,30 @@ public class ModelFallbackMiddlewareTests
     private static ModelFallbackMiddleware Middleware(FallbackOptions fallback, params IAuthProvider[] providers) =>
         new(Options.Create(OptionsWith(fallback)), providers, NullLogger<ModelFallbackMiddleware>.Instance);
 
-    private static ChatPipelineContext Context(string model, IAuthProvider provider) => new()
+    private static ChatPipelineContext Context(string model, IAuthProvider provider, JsonArray? tools = null)
     {
-        Http = new DefaultHttpContext(),
-        Surface = ClientSurface.OpenAi,
-        Model = model,
-        IsStreaming = false,
-        UpstreamRequest = new JsonObject
+        var request = new JsonObject
         {
             ["model"] = model,
             ["messages"] = new JsonArray { new JsonObject { ["role"] = "user", ["content"] = "hi" } },
-        },
-        Provider = provider,
-        Logger = NullLogger.Instance,
-    };
+        };
+
+        if (tools is not null)
+        {
+            request["tools"] = tools;
+        }
+
+        return new ChatPipelineContext
+        {
+            Http = new DefaultHttpContext(),
+            Surface = ClientSurface.OpenAi,
+            Model = model,
+            IsStreaming = false,
+            UpstreamRequest = request,
+            Provider = provider,
+            Logger = NullLogger.Instance,
+        };
+    }
 
     [Fact]
     public async Task Passes_through_when_disabled()
@@ -192,11 +202,34 @@ public class ModelFallbackMiddlewareTests
     }
 
     [Fact]
-    public void ValidateModels_disables_fallback_and_reports_problem_for_unknown_model()
+    public void ValidateModels_prunes_unknown_models_but_keeps_fallback_enabled()
     {
         var fallback = new FallbackOptions
         {
             Enabled = true,
+            Chains = { new FallbackChain { Models = { "primary", "missing-model", "secondary" } } },
+        };
+        var middleware = Middleware(fallback);
+        var providerModels = new[]
+        {
+            new ProviderResolver.ProviderModels(
+                new StubProvider("primary"), new[] { "primary", "secondary" }),
+        };
+
+        var problems = middleware.ValidateModels(providerModels);
+
+        fallback.Enabled.Should().BeTrue();
+        fallback.Chains[0].Models.Should().Equal("primary", "secondary");
+        problems.Should().ContainSingle().Which.Should().Contain("missing-model");
+    }
+
+    [Fact]
+    public void ValidateModels_disables_fallback_when_chains_mode_has_nothing_usable()
+    {
+        var fallback = new FallbackOptions
+        {
+            Enabled = true,
+            Mode = FallbackMode.Chains,
             Chains = { new FallbackChain { Models = { "primary", "missing-model" } } },
         };
         var middleware = Middleware(fallback);
@@ -208,17 +241,195 @@ public class ModelFallbackMiddlewareTests
         var problems = middleware.ValidateModels(providerModels);
 
         fallback.Enabled.Should().BeFalse();
-        var problem = problems.Should().ContainSingle().Which;
-        problem.Should().Contain("missing-model");
+        problems.Should().ContainSingle().Which.Should().Contain("missing-model");
+    }
+
+    [Fact]
+    public void ValidateModels_keeps_auto_mode_enabled_without_any_chains()
+    {
+        var fallback = new FallbackOptions { Enabled = true };
+        var middleware = Middleware(fallback);
+
+        var problems = middleware.ValidateModels(Array.Empty<ProviderResolver.ProviderModels>());
+
+        problems.Should().BeEmpty();
+        fallback.Enabled.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task Auto_falls_back_to_another_connected_model_without_configuration()
+    {
+        var provider = new StubProvider("primary", "backup");
+        var fallback = new FallbackOptions { Enabled = true };
+        var middleware = Middleware(fallback, provider);
+
+        var context = Context("primary", provider);
+        var models = new List<string>();
+
+        await middleware.InvokeAsync(context, ctx =>
+        {
+            var current = ctx.UpstreamRequest["model"]!.GetValue<string>();
+            models.Add(current);
+            if (current == "primary")
+            {
+                throw new UpstreamException(503, "service unavailable");
+            }
+            return Task.CompletedTask;
+        });
+
+        models.Should().Equal("primary", "backup");
+        context.Model.Should().Be("backup");
+    }
+
+    [Fact]
+    public async Task Auto_never_falls_back_onto_an_excluded_model()
+    {
+        var provider = new StubProvider("primary", "backup");
+        var fallback = new FallbackOptions { Enabled = true, Exclude = { "backup" } };
+        var middleware = Middleware(fallback, provider);
+
+        var context = Context("primary", provider);
+        var models = new List<string>();
+
+        Func<Task> act = () => middleware.InvokeAsync(context, ctx =>
+        {
+            models.Add(ctx.UpstreamRequest["model"]!.GetValue<string>());
+            throw new UpstreamException(503, "service unavailable");
+        });
+        await act.Should().ThrowAsync<UpstreamException>();
+
+        models.Should().Equal("primary");
+    }
+
+    [Fact]
+    public async Task Auto_skips_candidates_that_cannot_serve_the_request()
+    {
+        // The request offers tools, so the model that cannot call them is not a valid substitute.
+        var infos = new Dictionary<string, ModelInfo>
+        {
+            ["no-tools"] = new() { SupportsToolCalls = false },
+            ["tool-capable"] = new() { SupportsToolCalls = true },
+        };
+        var provider = new StubProvider(infos, "primary", "no-tools", "tool-capable");
+        var fallback = new FallbackOptions { Enabled = true };
+        var middleware = Middleware(fallback, provider);
+
+        var tools = new JsonArray { new JsonObject { ["type"] = "function" } };
+        var context = Context("primary", provider, tools);
+        var models = new List<string>();
+
+        await middleware.InvokeAsync(context, ctx =>
+        {
+            var current = ctx.UpstreamRequest["model"]!.GetValue<string>();
+            models.Add(current);
+            if (current == "primary")
+            {
+                throw new UpstreamException(429, "rate limited");
+            }
+            return Task.CompletedTask;
+        });
+
+        models.Should().Equal("primary", "tool-capable");
+    }
+
+    [Fact]
+    public async Task Auto_prefers_the_same_family_and_honors_MaxCandidates()
+    {
+        var infos = new Dictionary<string, ModelInfo>
+        {
+            ["primary"] = new() { Family = "gpt", MaxContextWindowTokens = 100_000 },
+            ["other-family"] = new() { Family = "claude", MaxContextWindowTokens = 200_000 },
+            ["same-family"] = new() { Family = "gpt", MaxContextWindowTokens = 128_000 },
+        };
+        var provider = new StubProvider(infos, "primary", "other-family", "same-family");
+        var fallback = new FallbackOptions { Enabled = true, MaxCandidates = 1 };
+        var middleware = Middleware(fallback, provider);
+
+        var context = Context("primary", provider);
+        var models = new List<string>();
+
+        await middleware.InvokeAsync(context, ctx =>
+        {
+            var current = ctx.UpstreamRequest["model"]!.GetValue<string>();
+            models.Add(current);
+            if (current == "primary")
+            {
+                throw new UpstreamException(503, "service unavailable");
+            }
+            return Task.CompletedTask;
+        });
+
+        models.Should().Equal("primary", "same-family");
+    }
+
+    [Fact]
+    public async Task Auto_skips_candidates_with_a_smaller_context_window()
+    {
+        var infos = new Dictionary<string, ModelInfo>
+        {
+            ["primary"] = new() { MaxContextWindowTokens = 200_000 },
+            ["too-small"] = new() { MaxContextWindowTokens = 8_000 },
+            ["big-enough"] = new() { MaxContextWindowTokens = 200_000 },
+        };
+        var provider = new StubProvider(infos, "primary", "too-small", "big-enough");
+        var fallback = new FallbackOptions { Enabled = true };
+        var middleware = Middleware(fallback, provider);
+
+        var context = Context("primary", provider);
+        var models = new List<string>();
+
+        await middleware.InvokeAsync(context, ctx =>
+        {
+            var current = ctx.UpstreamRequest["model"]!.GetValue<string>();
+            models.Add(current);
+            if (current == "primary")
+            {
+                throw new UpstreamException(503, "service unavailable");
+            }
+            return Task.CompletedTask;
+        });
+
+        models.Should().Equal("primary", "big-enough");
+    }
+
+    [Fact]
+    public async Task Chains_mode_does_not_fall_back_for_an_unlisted_model()
+    {
+        var provider = new StubProvider("primary", "backup");
+        var fallback = new FallbackOptions { Enabled = true, Mode = FallbackMode.Chains };
+        var middleware = Middleware(fallback, provider);
+
+        var context = Context("primary", provider);
+        var calls = 0;
+
+        Func<Task> act = () => middleware.InvokeAsync(context, _ =>
+        {
+            calls++;
+            throw new UpstreamException(503, "service unavailable");
+        });
+        await act.Should().ThrowAsync<UpstreamException>();
+
+        calls.Should().Be(1);
+        context.Model.Should().Be("primary");
     }
 
     private sealed class StubProvider : IAuthProvider
     {
-        private readonly string _model;
+        private readonly IReadOnlyList<string> _models;
+        private readonly IReadOnlyDictionary<string, ModelInfo> _infos;
 
-        public StubProvider(string model) => _model = model;
+        public StubProvider(params string[] models)
+            : this(new Dictionary<string, ModelInfo>(), models)
+        {
+        }
 
-        public string Name => _model;
+        public StubProvider(IReadOnlyDictionary<string, ModelInfo> infos, params string[] models)
+        {
+            _models = models;
+            _infos = infos;
+        }
+
+        public string Name => _models.Count > 0 ? _models[0] : "stub";
 
         public Task RunConnectAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
 
@@ -230,10 +441,10 @@ public class ModelFallbackMiddlewareTests
             Task.FromResult("token");
 
         public Task<IReadOnlyList<string>> GetSelectedModelsAsync(CancellationToken cancellationToken = default) =>
-            Task.FromResult<IReadOnlyList<string>>(new[] { _model });
+            Task.FromResult(_models);
 
         public Task<IReadOnlyDictionary<string, ModelInfo>> GetModelInfosAsync(CancellationToken cancellationToken = default) =>
-            Task.FromResult<IReadOnlyDictionary<string, ModelInfo>>(new Dictionary<string, ModelInfo>());
+            Task.FromResult(_infos);
 
         public Task<string?> GetUpstreamApiBaseUrlAsync(CancellationToken cancellationToken = default) =>
             Task.FromResult<string?>(null);

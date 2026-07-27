@@ -154,8 +154,10 @@ public static class ProxyCommand
             // grouped their problems, so this just prints the shared reason once. The check runs
             // against the models listed above (the ones selected at connect time), not against
             // everything the upstream offers - hence the hint to re-run 'AiProxy models'.
+            // Each middleware decides how to cope: some disable themselves, some just drop the
+            // offending id, so the lines below say which happened.
             Row("WARNING", "These models are not in the selected list above,");
-            Cont("so the features below are disabled for this run:");
+            Cont("so the features below are degraded for this run:");
             foreach (var warning in startupWarnings)
             {
                 Cont($"  - {warning}");
