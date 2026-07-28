@@ -114,6 +114,16 @@ public static partial class OllamaEndpoints
             modelInfo["general.context_length"] = contextLength;
         }
 
+        // Ollama reports a single shared context window, so the client has to split it into
+        // input + output budgets. Without an explicit max_output_tokens it assumes 4096 and
+        // truncates long completions, so publish the real upstream limit.
+        var maxOutputTokens = info?.MaxOutputTokens ?? 0;
+        if (maxOutputTokens > 0)
+        {
+            modelInfo["max_output_tokens"] = maxOutputTokens;
+            modelInfo[$"{arch}.max_output_tokens"] = maxOutputTokens;
+        }
+
         // Expose context window via the Modelfile-style parameters field too — some
         // Ollama clients read num_ctx from there to size the token gauge.
         var parametersText = contextLength > 0 ? $"num_ctx {contextLength}\n" : "";
