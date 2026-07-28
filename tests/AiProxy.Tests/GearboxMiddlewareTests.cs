@@ -26,6 +26,14 @@ public class GearboxMiddlewareTests
     private static GearboxMiddleware Middleware(GearboxOptions gearbox, GearboxState state, params IAuthProvider[] providers) =>
         new(Options.Create(new AiProxyOptions { Gearbox = gearbox }), state, providers, NullLogger<GearboxMiddleware>.Instance);
 
+    private static GearboxMiddleware MiddlewareWithPriority(
+        GearboxOptions gearbox, GearboxState state, List<string> priority) =>
+        new(
+            Options.Create(new AiProxyOptions { Gearbox = gearbox, ModelPriorityHighToLow = priority }),
+            state,
+            Array.Empty<IAuthProvider>(),
+            NullLogger<GearboxMiddleware>.Instance);
+
     private static ChatPipelineContext Context(string model, IAuthProvider provider) => new()
     {
         Http = new DefaultHttpContext(),
@@ -331,20 +339,59 @@ public class GearboxMiddlewareTests
         gearbox.Gears.Select(g => g.Model).Should().Equal("opus", "sonnet");
     }
 
-    [Theory]
-    [InlineData("claude-opus-5", "Opus")]
-    [InlineData("claude-sonnet-5", "Sonnet")]
-    [InlineData("gemini-3.6-flash", "Flash")]
-    [InlineData("gpt-5.6-luna", "Luna")]
-    [InlineData("gpt-5.6-terra", "Terra")]
-    [InlineData("gpt-4o", "4o")]                     // nothing but the family and a variant
-    [InlineData("o3-mini", "O3-Mini")]               // unknown family: keep both segments
-    [InlineData("llama3.1:8b", "Llama3.1-8b")]       // ollama-style tag
-    [InlineData("claude-3-5-sonnet-20241022", "Sonnet")]
-    [InlineData("gpt-5.6", "Gpt")]                   // family only: better than an empty label
-    [InlineData("5.6", "5.6")]                       // version only: nothing to shorten
-    public void DeriveLabel_shortens_model_ids(string model, string expected) =>
-        GearboxMiddleware.DeriveLabel(model).Should().Be(expected);
+    [Fact]
+    public void ValidateModels_orders_auto_gears_cheapest_first_when_a_priority_is_configured()
+    {
+        var gearbox = new GearboxOptions { Enabled = true };
+        var priority = new List<string> { "Opus", "Sonnet", "Haiku" };
+        var middleware = MiddlewareWithPriority(gearbox, StateFor(gearbox), priority);
+        var providerModels = new[]
+        {
+            new ProviderResolver.ProviderModels(
+                new StubProvider("opus"), new[] { "claude-sonnet-5", "claude-opus-5", "claude-haiku-5" }),
+        };
+
+        middleware.ValidateModels(providerModels);
+
+        gearbox.Gears.Select(g => g.Model)
+            .Should().Equal("claude-haiku-5", "claude-sonnet-5", "claude-opus-5");
+    }
+
+    [Fact]
+    public void ValidateModels_keeps_the_strongest_models_when_the_priority_order_is_capped()
+    {
+        var gearbox = new GearboxOptions { Enabled = true, MaxAutoGears = 2 };
+        var priority = new List<string> { "Opus", "Sonnet", "Haiku" };
+        var middleware = MiddlewareWithPriority(gearbox, StateFor(gearbox), priority);
+        var providerModels = new[]
+        {
+            new ProviderResolver.ProviderModels(
+                new StubProvider("opus"), new[] { "claude-haiku-5", "claude-opus-5", "claude-sonnet-5" }),
+        };
+
+        middleware.ValidateModels(providerModels);
+
+        gearbox.Gears.Select(g => g.Model).Should().Equal("claude-sonnet-5", "claude-opus-5");
+    }
+
+    [Fact]
+    public void ValidateModels_ranks_unlisted_models_below_the_listed_ones()
+    {
+        var gearbox = new GearboxOptions { Enabled = true };
+        var priority = new List<string> { "Opus" };
+        var middleware = MiddlewareWithPriority(gearbox, StateFor(gearbox), priority);
+        var providerModels = new[]
+        {
+            new ProviderResolver.ProviderModels(
+                new StubProvider("opus"), new[] { "claude-opus-5", "local-a", "local-b" }),
+        };
+
+        middleware.ValidateModels(providerModels);
+
+        // Reversed, so the unlisted tail becomes the low gears (in connected order) and the only
+        // ranked model takes the top gear.
+        gearbox.Gears.Select(g => g.Model).Should().Equal("local-b", "local-a", "claude-opus-5");
+    }
 
     [Fact]
     public void ValidateModels_labels_auto_gears_from_their_model_id()

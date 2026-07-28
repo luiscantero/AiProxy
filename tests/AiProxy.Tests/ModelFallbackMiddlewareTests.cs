@@ -19,6 +19,13 @@ public class ModelFallbackMiddlewareTests
     private static ModelFallbackMiddleware Middleware(FallbackOptions fallback, params IAuthProvider[] providers) =>
         new(Options.Create(OptionsWith(fallback)), providers, NullLogger<ModelFallbackMiddleware>.Instance);
 
+    private static ModelFallbackMiddleware MiddlewareWithPriority(
+        FallbackOptions fallback, List<string> priority, params IAuthProvider[] providers) =>
+        new(
+            Options.Create(new AiProxyOptions { Fallback = fallback, ModelPriorityHighToLow = priority }),
+            providers,
+            NullLogger<ModelFallbackMiddleware>.Instance);
+
     private static ChatPipelineContext Context(string model, IAuthProvider provider, JsonArray? tools = null)
     {
         var request = new JsonObject
@@ -390,6 +397,57 @@ public class ModelFallbackMiddlewareTests
         });
 
         models.Should().Equal("primary", "big-enough");
+    }
+
+    [Fact]
+    public async Task Auto_steps_down_the_configured_priority_order()
+    {
+        var provider = new StubProvider("claude-sonnet-5", "claude-opus-5", "claude-haiku-5");
+        var fallback = new FallbackOptions { Enabled = true };
+        var priority = new List<string> { "Opus", "Sonnet", "Haiku" };
+        var middleware = MiddlewareWithPriority(fallback, priority, provider);
+
+        var context = Context("claude-sonnet-5", provider);
+        var models = new List<string>();
+
+        await middleware.InvokeAsync(context, ctx =>
+        {
+            var current = ctx.UpstreamRequest["model"]!.GetValue<string>();
+            models.Add(current);
+            if (current == "claude-sonnet-5")
+            {
+                throw new UpstreamException(503, "service unavailable");
+            }
+            return Task.CompletedTask;
+        });
+
+        // The rung below, not the stronger (and pricier) model above.
+        models.Should().Equal("claude-sonnet-5", "claude-haiku-5");
+    }
+
+    [Fact]
+    public async Task Auto_uses_a_stronger_model_only_as_a_last_resort()
+    {
+        var provider = new StubProvider("claude-sonnet-5", "claude-opus-5", "claude-haiku-5");
+        var fallback = new FallbackOptions { Enabled = true };
+        var priority = new List<string> { "Opus", "Sonnet", "Haiku" };
+        var middleware = MiddlewareWithPriority(fallback, priority, provider);
+
+        var context = Context("claude-sonnet-5", provider);
+        var models = new List<string>();
+
+        await middleware.InvokeAsync(context, ctx =>
+        {
+            var current = ctx.UpstreamRequest["model"]!.GetValue<string>();
+            models.Add(current);
+            if (current != "claude-opus-5")
+            {
+                throw new UpstreamException(503, "service unavailable");
+            }
+            return Task.CompletedTask;
+        });
+
+        models.Should().Equal("claude-sonnet-5", "claude-haiku-5", "claude-opus-5");
     }
 
     [Fact]

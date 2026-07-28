@@ -51,8 +51,8 @@ public sealed partial class GearboxMiddleware : IChatMiddleware, IStartupModelVa
         $"client asked for. Shift gears at {_options.Value.ListenUrl.TrimEnd('/')}/gearbox; " +
         "Neutral (N) passes requests through untouched. " +
         (_options.Value.Gearbox.Gears.Count == 0
-            ? $"Gears are built automatically from the first {_options.Value.Gearbox.MaxAutoGears} " +
-              "connected models."
+            ? $"Up to {_options.Value.Gearbox.MaxAutoGears} gears are built automatically from the " +
+              "connected models, ordered by ModelPriorityHighToLow when one is configured."
             : $"{_options.Value.Gearbox.Gears.Count} gear(s) available.");
 
     /// <summary>
@@ -77,7 +77,7 @@ public sealed partial class GearboxMiddleware : IChatMiddleware, IStartupModelVa
             // Nothing configured: derive the shifter from what is actually connected. Auto gears
             // are built from the live catalog, so they can never reference a stale model id and
             // the loop below has nothing to prune.
-            PopulateAutoGears(gearbox, providerModels);
+            PopulateAutoGears(gearbox, _options.Value.ModelPriorityHighToLow, providerModels);
             LogAutoGears(_logger, gearbox.Gears.Count);
         }
 
@@ -127,18 +127,32 @@ public sealed partial class GearboxMiddleware : IChatMiddleware, IStartupModelVa
     }
 
     /// <summary>
-    /// Fills the shifter with one gear per connected model, in selection order, at positions
-    /// "1".."N" (capped by <see cref="GearboxOptions.MaxAutoGears"/>). Each gear gets a short
-    /// label derived from its model id (see <see cref="DeriveLabel"/>) so the shifter stays
-    /// readable; the full model id is still shown in the readout and the button tooltip.
+    /// Fills the shifter with one gear per connected model at positions "1".."N" (capped by
+    /// <see cref="GearboxOptions.MaxAutoGears"/>). Each gear gets a short label derived from its
+    /// model id (see <see cref="ModelPriority.DeriveLabel"/>) so the shifter stays readable; the
+    /// full model id is still shown in the readout and the button tooltip.
+    ///
+    /// <para>
+    /// With an <see cref="AiProxyOptions.ModelPriorityHighToLow"/> configured the shifter is laid
+    /// out like a real gearbox: the cap keeps the strongest models, and they are then flipped so
+    /// gear 1 is the cheapest and the top gear the most powerful. Without one there is no notion
+    /// of "cheapest", so the connected order is used as-is.
+    /// </para>
     /// </summary>
     private static void PopulateAutoGears(
-        GearboxOptions gearbox, IReadOnlyList<ProviderResolver.ProviderModels> providerModels)
+        GearboxOptions gearbox,
+        IReadOnlyList<string> priority,
+        IReadOnlyList<ProviderResolver.ProviderModels> providerModels)
     {
-        var models = providerModels
+        var connected = providerModels
             .SelectMany(pm => pm.Models)
             .Distinct(StringComparer.OrdinalIgnoreCase)
-            .Take(Math.Max(0, gearbox.MaxAutoGears));
+            .ToList();
+
+        var cap = Math.Max(0, gearbox.MaxAutoGears);
+        var models = priority.Count == 0
+            ? connected.Take(cap)
+            : ModelPriority.Order(priority, connected).Take(cap).Reverse();
 
         var position = 1;
         foreach (var model in models)
@@ -146,72 +160,12 @@ public sealed partial class GearboxMiddleware : IChatMiddleware, IStartupModelVa
             gearbox.Gears.Add(new GearOptions
             {
                 Position = position.ToString(),
-                Label = DeriveLabel(model),
+                Label = ModelPriority.DeriveLabel(model),
                 Model = model
             });
             position++;
         }
     }
-
-    private static readonly char[] LabelSeparators = ['-', '_', ':', '/', ' '];
-
-    /// <summary>
-    /// Model ids that carry no information once the rest of the id is on screen: every gear in a
-    /// family would repeat them, so they are dropped when something more specific remains.
-    /// </summary>
-    private static readonly HashSet<string> ModelFamilies = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "gpt", "chatgpt", "claude", "gemini", "gemma", "llama", "mistral", "mixtral",
-        "qwen", "deepseek", "grok", "phi", "codestral", "command", "nova", "openai"
-    };
-
-    /// <summary>
-    /// Squeezes a model id into a short gear label: version-only segments and a leading family
-    /// name are dropped, so <c>claude-opus-5</c> becomes "Opus", <c>gemini-3.6-flash</c> becomes
-    /// "Flash" and <c>gpt-5.6-luna</c> becomes "Luna". Ids that hold nothing else (<c>gpt-4o</c>,
-    /// <c>llama3.1:8b</c>) keep what is left rather than being emptied out, and an id that is
-    /// nothing but a version is returned unchanged. Two models can collapse to the same label —
-    /// the readout and the button tooltip still show the full id, so the gear stays identifiable.
-    /// </summary>
-    internal static string DeriveLabel(string model)
-    {
-        if (string.IsNullOrWhiteSpace(model))
-        {
-            return string.Empty;
-        }
-
-        var segments = model
-            .Split(LabelSeparators, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .Where(s => !IsVersion(s))
-            .ToList();
-
-        if (segments.Count > 1 && ModelFamilies.Contains(segments[0]))
-        {
-            segments.RemoveAt(0);
-        }
-
-        return segments.Count == 0
-            ? model
-            : string.Join('-', segments.Select(Capitalize));
-    }
-
-    /// <summary>True for segments that are only a version or date stamp: "5", "3.6", "v2", "20240229".</summary>
-    private static bool IsVersion(string segment)
-    {
-        var digits = segment[0] is 'v' or 'V' && segment.Length > 1 ? segment.AsSpan(1) : segment.AsSpan();
-        foreach (var c in digits)
-        {
-            if (!char.IsAsciiDigit(c) && c != '.')
-            {
-                return false;
-            }
-        }
-
-        return true;
-    }
-
-    private static string Capitalize(string segment) =>
-        char.IsLower(segment[0]) ? char.ToUpperInvariant(segment[0]) + segment[1..] : segment;
 
     /// <summary>
     /// Renders the engaged gear as "[position] label -> model", or a Neutral pass-through note.

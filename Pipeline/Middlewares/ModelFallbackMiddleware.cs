@@ -63,8 +63,9 @@ public sealed partial class ModelFallbackMiddleware : IChatMiddleware, IStartupM
             var fallback = _options.Value.Fallback;
             var source = fallback.Mode == FallbackMode.Auto
                 ? $"Alternatives are picked automatically from the connected models (up to " +
-                  $"{fallback.MaxCandidates} per request), preferring the same family, a large " +
-                  "enough context window, and the capabilities the request actually uses."
+                  $"{fallback.MaxCandidates} per request), preferring a large enough context " +
+                  "window and the capabilities the request actually uses, and stepping down " +
+                  "ModelPriorityHighToLow (or the same family, when nothing is configured)."
                 : "Alternatives come only from the configured Fallback.Chains.";
 
             return "Retries a request against another model when the upstream returns a retryable " +
@@ -268,10 +269,17 @@ public sealed partial class ModelFallbackMiddleware : IChatMiddleware, IStartupM
     /// A candidate is only considered when it can actually serve <i>this</i> request: the request
     /// itself states the requirements (image parts need vision, a <c>tools</c> array needs tool
     /// calls), and a model whose context window is known to be smaller than the primary's is
-    /// dropped rather than risking a truncation failure. Survivors are ranked by same family
-    /// first, then by the closest (smallest sufficient) context window, then by the order the
-    /// models were selected in — so failover lands on the nearest equivalent rather than the
-    /// biggest or most expensive model available.
+    /// dropped rather than risking a truncation failure.
+    /// </para>
+    ///
+    /// <para>
+    /// Survivors are then ordered. When an <see cref="AiProxyOptions.ModelPriorityHighToLow"/> is
+    /// configured, it decides: the request steps <b>down</b> it, nearest rung first, so an outage
+    /// degrades gracefully instead of quietly escalating every request onto your priciest model —
+    /// stronger models are kept as a last resort behind everything else. Models the list says
+    /// nothing about (and every model, when no list is configured) fall back to the capability
+    /// heuristic: same family first, then the closest (smallest sufficient) context window, then
+    /// the order the models were selected in.
     /// </para>
     /// </summary>
     private async Task<IReadOnlyList<string>> BuildAutoAlternativesAsync(
@@ -288,7 +296,17 @@ public sealed partial class ModelFallbackMiddleware : IChatMiddleware, IStartupM
         var needsToolCalls = RequestHasTools(context.UpstreamRequest);
         var excluded = new HashSet<string>(options.Exclude, StringComparer.OrdinalIgnoreCase);
 
-        var ranked = new List<(string Model, int FamilyRank, long WindowDelta, int SelectionOrder)>();
+        var priority = _options.Value.ModelPriorityHighToLow;
+
+        // An unranked primary is treated as sitting below the whole list, so its ranked
+        // alternatives are approached from the cheap end rather than the expensive one.
+        var primaryRank = ModelPriority.Rank(priority, primary);
+        if (primaryRank == ModelPriority.Unranked)
+        {
+            primaryRank = priority.Count;
+        }
+
+        var ranked = new List<(string Model, int Tier, int Step, int FamilyRank, long WindowDelta, int SelectionOrder)>();
 
         for (var i = 0; i < order.Count; i++)
         {
@@ -327,11 +345,44 @@ public sealed partial class ModelFallbackMiddleware : IChatMiddleware, IStartupM
             // An unknown window sorts last within its family group rather than pretending to match.
             var windowDelta = primaryWindow is int p && window is int w ? w - p : long.MaxValue;
 
-            ranked.Add((candidate, familyRank, windowDelta, i));
+            int tier, step;
+            var rank = ModelPriority.Rank(priority, candidate);
+            if (rank == ModelPriority.Unranked)
+            {
+                // No opinion configured about this model: leave it to the heuristic keys below.
+                tier = 1;
+                step = 0;
+            }
+            else if (rank > primaryRank)
+            {
+                // Weaker than the failed model: step down one rung at a time.
+                tier = 0;
+                step = rank;
+            }
+            else
+            {
+                // Stronger than the failed model: a last resort, and the cheapest of those first.
+                tier = 2;
+                step = -rank;
+            }
+
+            ranked.Add((candidate, tier, step, familyRank, windowDelta, i));
         }
 
         ranked.Sort((a, b) =>
         {
+            var byTier = a.Tier.CompareTo(b.Tier);
+            if (byTier != 0)
+            {
+                return byTier;
+            }
+
+            var byStep = a.Step.CompareTo(b.Step);
+            if (byStep != 0)
+            {
+                return byStep;
+            }
+
             var byFamily = a.FamilyRank.CompareTo(b.FamilyRank);
             if (byFamily != 0)
             {

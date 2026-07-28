@@ -91,6 +91,30 @@ values while you edit.
 - `Copilot:ClientId` / `Copilot:UpstreamBaseUrl` — Copilot device-flow client
   and upstream API base. The defaults work for normal Copilot accounts.
 - `Apis:Ollama` / `Apis:OpenAi` — toggle which API surfaces are exposed.
+- `ModelPriorityHighToLow` — your models ranked **most powerful (and usually most
+  expensive) first**. It is the one place that decides "which model is stronger",
+  and every feature that has to choose between models reads it: the
+  [gearbox](#gearbox-middleware) lays its automatic gears out along it (gear 1 the
+  cheapest, the top gear the strongest) and
+  [model fallback](#model-fallback-middleware) steps *down* it when a model fails,
+  instead of escalating onto something pricier.
+
+  Entries are matched **tolerantly**, so the short label a model is known by is
+  enough — and a label survives a version bump, unlike a pinned id:
+
+```jsonc
+"ModelPriorityHighToLow": [ "Opus", "Sol", "Luna", "Terra", "Sonnet" ]
+```
+
+  An entry may be a short label (`Opus` ranks `claude-opus-5` — and still ranks
+  `claude-opus-6` next year), a full model id (`claude-opus-5`), or a partial one
+  (`sonnet-4.5`). One entry may match several models: that defines a *tier*, not
+  an ambiguity. Where two entries both match, the more specific one wins, so
+  listing `gpt-4o-mini` explicitly still outranks a looser `gpt-4o` above it.
+  Models you leave out are not excluded — they simply carry no ranking, so listing
+  your top few is enough. An entry that matches nothing you have connected is
+  dropped at startup with a warning. Leave the list empty and both features behave
+  exactly as they did before it existed.
 - `OpenAiProviders` — a list of OpenAI-compatible upstreams to expose (OpenAI,
   OpenRouter, Groq, DeepSeek, xAI, Gemini's OpenAI endpoint, local runtimes,
   ...). Each entry needs a `Name` and `BaseUrl`; adding one is configuration
@@ -325,9 +349,16 @@ be able to serve *this* request:
   `tools` array needs a tool-calling model;
 - a model whose context window is known to be **smaller** than the failed one's is
   dropped, rather than trading an outage for a truncation error;
-- survivors are ranked by **same family** first, then by the **closest** (smallest
-  sufficient) context window, then by the order you selected them in — so failover
-  lands on the nearest equivalent, not on the biggest or priciest model you own.
+- survivors are ordered by [`ModelPriorityHighToLow`](#configuration) when you
+  configure one: the request steps **down** it, nearest rung first, so an outage
+  degrades gracefully instead of quietly escalating every request onto your
+  priciest model — stronger models are kept as a last resort behind everything
+  else;
+- models the priority list says nothing about (and every model, when you have no
+  list) fall back to the capability heuristic: **same family** first, then the
+  **closest** (smallest sufficient) context window, then the order you selected
+  them in — so failover lands on the nearest equivalent, not on the biggest or
+  priciest model you own.
 
 At most `MaxCandidates` alternatives are tried, and anything in `Exclude` is never
 chosen automatically. The catalog is only read **after** a failure, so the happy
@@ -388,9 +419,12 @@ chat request is re-routed onto whichever gear is currently engaged — no matter
 which model the client (e.g. VS Code) actually asked for.
 
 Leave `Gears` **empty** and the shifter is built for you at startup: one gear per
-connected model, in selection order, up to `MaxAutoGears`. Like `Fallback`'s Auto
-mode, that leaves no model ids in configuration to go stale. Fill `Gears` in only
-when you want specific positions, ordering, or labels.
+connected model, up to `MaxAutoGears`. Like `Fallback`'s Auto mode, that leaves no
+model ids in configuration to go stale. With a
+[`ModelPriorityHighToLow`](#configuration) configured the shifter is laid out like
+a real gearbox — the cap keeps the strongest models, and **gear 1 is the cheapest**
+with the top gear the most powerful; without one, the connected order is used
+as-is. Fill `Gears` in only when you want specific positions, ordering, or labels.
 
 - **Neutral** (`N`, the default) is a pass-through: the client's own model choice
   is honored. Any gear with an empty `Model` behaves the same way — handy for a
@@ -463,6 +497,9 @@ feature down over a single bad id any more:
   with a model survives.
 - **Caveman** disables itself, since it has exactly one model to compress with and
   no meaningful way to carry on without it.
+- **`ModelPriorityHighToLow`** is checked first, before any middleware, since the
+  gearbox builds its automatic gears from it. Entries that match no connected
+  model are *removed from the order*; the rest still rank.
 
 #### Ideas for future middlewares
 

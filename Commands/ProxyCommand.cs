@@ -60,6 +60,20 @@ public static class ProxyCommand
             app.Services.GetServices<IAuthProvider>(), cancellationToken).ConfigureAwait(false);
 
         var startupWarnings = new List<string>();
+
+        // The shared priority order is pruned first: the gearbox lays its automatic gears out
+        // along it, so an entry naming nothing must be gone before the middlewares validate.
+        var unrankable = ModelPriority.Prune(
+            optionsAtBuild.ModelPriorityHighToLow,
+            byProvider.SelectMany(pm => pm.Models).ToList());
+
+        if (unrankable.Count > 0)
+        {
+            startupWarnings.Add(
+                $"ModelPriorityHighToLow: {string.Join(", ", unrankable)} " +
+                "(matches no connected model; removed from the order)");
+        }
+
         foreach (var middleware in app.Services.GetServices<IChatMiddleware>().OfType<IStartupModelValidator>())
         {
             startupWarnings.AddRange(middleware.ValidateModels(byProvider));

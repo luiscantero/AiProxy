@@ -41,6 +41,23 @@ public sealed class AiProxyOptions
     /// configuration-only — no code changes required.
     /// </summary>
     public List<OpenAiCompatibleProviderOptions> OpenAiProviders { get; set; } = new();
+
+    /// <summary>
+    /// Your models ranked from most powerful (and typically most expensive) to least, shared by
+    /// every feature that has to choose between models: the gearbox lays its automatic gears out
+    /// along it (gear 1 the cheapest, the top gear the strongest) and fallback steps <i>down</i>
+    /// it when a model fails, instead of escalating onto something pricier.
+    ///
+    /// <para>
+    /// Entries are matched tolerantly, so the short label a model is known by is enough:
+    /// "Opus" ranks <c>claude-opus-5</c> (and still ranks <c>claude-opus-6</c> after a version
+    /// bump). A full model id or a partial one such as "sonnet-4.5" also works. Models you leave
+    /// out are not excluded — they simply carry no ranking, so listing your top few is enough.
+    /// Leave this empty to keep the previous behavior: gears in connected order, and fallback
+    /// ranked purely by the capability heuristic.
+    /// </para>
+    /// </summary>
+    public List<string> ModelPriorityHighToLow { get; set; } = new();
 }
 
 public sealed class CopilotOptions
