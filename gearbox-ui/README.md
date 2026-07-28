@@ -6,9 +6,9 @@ instead of a browser tab.
 
 It talks to the endpoints the proxy already exposes:
 
-| Endpoint | Purpose |
-| --- | --- |
-| `GET  {proxy}/gearbox/state` | configured gears plus the engaged one |
+| Endpoint                     | Purpose                                              |
+| ---------------------------- | ---------------------------------------------------- |
+| `GET  {proxy}/gearbox/state` | configured gears plus the engaged one                |
 | `POST {proxy}/gearbox/shift` | `{ "position": "3" }` engages a gear (`N` = Neutral) |
 
 All HTTP happens in Rust, not in the webview, so the page runs under a strict `default-src 'self'`
@@ -29,13 +29,13 @@ The gearbox must be enabled in the proxy (`Gearbox.Enabled: true`); if it is not
 
 ## Prerequisites
 
-| Requirement | Notes |
-| --- | --- |
-| Rust (stable, MSVC toolchain) | `winget install Rustlang.Rustup` |
-| MSVC C++ build tools | in the Visual Studio installer's *Individual components*: **"MSVC Build Tools version 14.51"** (id `Microsoft.VisualStudio.Component.VC.Tools.x86.x64`) — the standalone Build Tools installer works too |
-| Windows SDK | comes with the component above |
-| WebView2 runtime | preinstalled on Windows 11 |
-| Tauri CLI | `cargo install tauri-cli --version "^2.0" --locked` |
+| Requirement                   | Notes                                                                                                                                                                                                    |
+| ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Rust (stable, MSVC toolchain) | `winget install Rustlang.Rustup`                                                                                                                                                                         |
+| MSVC C++ build tools          | in the Visual Studio installer's *Individual components*: **"MSVC Build Tools version 14.51"** (id `Microsoft.VisualStudio.Component.VC.Tools.x86.x64`) — the standalone Build Tools installer works too |
+| Windows SDK                   | comes with the component above                                                                                                                                                                           |
+| WebView2 runtime              | preinstalled on Windows 11                                                                                                                                                                               |
+| Tauri CLI                     | `cargo install tauri-cli --version "^2.0" --locked`                                                                                                                                                      |
 
 Node is only needed to regenerate the icon, and only from the standard library — there are no npm
 dependencies.
@@ -60,12 +60,37 @@ cargo tauri dev
 cargo tauri build
 ```
 
+## Where the executable lands
+
+The binary is named after the **crate** (`gearbox-ui`), not after `productName` in
+tauri.conf.json — so don't go looking for `AiProxy Gearbox.exe`. Only the installer uses the
+product name. Paths are relative to this folder:
+
+| Command                                                      | Output                                                                                                    |
+| ------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------- |
+| `cargo build --release --manifest-path src-tauri/Cargo.toml` | `src-tauri/target/release/gearbox-ui.exe` (~3 MB)                                                         |
+| `cargo build --manifest-path src-tauri/Cargo.toml`           | `src-tauri/target/debug/gearbox-ui.exe`                                                                   |
+| `cargo tauri build`                                          | the same release exe, plus `src-tauri/target/release/bundle/nsis/AiProxy Gearbox_<version>_x64-setup.exe` |
+
+Or just ask for it:
+
+```powershell
+Get-ChildItem src-tauri/target -Recurse -Filter gearbox-ui.exe | Select-Object FullName, Length
+```
+
+The release exe is self-contained — copy it anywhere, no install needed; it only requires the
+WebView2 runtime (already on Windows 11). Handy for a Start-menu or taskbar shortcut:
+
+```powershell
+Start-Process src-tauri/target/release/gearbox-ui.exe
+```
+
 ## Layout
 
-| Path | What |
-| --- | --- |
-| `ui/` | the whole frontend: static HTML/CSS/JS, no bundler |
-| `src-tauri/src/main.rs` | `fetch_state` / `shift` / settings commands |
-| `src-tauri/tauri.conf.json` | window, CSP, bundle |
-| `src-tauri/capabilities/default.json` | granted permissions |
-| `tools/make-icon.mjs` | draws `icon-source.png` (raw PNG, no image deps) |
+| Path                                  | What                                               |
+| ------------------------------------- | -------------------------------------------------- |
+| `ui/`                                 | the whole frontend: static HTML/CSS/JS, no bundler |
+| `src-tauri/src/main.rs`               | `fetch_state` / `shift` / settings commands        |
+| `src-tauri/tauri.conf.json`           | window, CSP, bundle                                |
+| `src-tauri/capabilities/default.json` | granted permissions                                |
+| `tools/make-icon.mjs`                 | draws `icon-source.png` (raw PNG, no image deps)   |
