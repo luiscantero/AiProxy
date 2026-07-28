@@ -103,7 +103,7 @@ values while you edit.
   enough — and a label survives a version bump, unlike a pinned id:
 
 ```jsonc
-"ModelPriorityHighToLow": [ "Opus", "Sol", "Luna", "Terra", "Sonnet" ]
+"ModelPriorityHighToLow": [ "Opus", "Sol", "Terra", "Sonnet", "Luna" ]
 ```
 
   An entry may be a short label (`Opus` ranks `claude-opus-5` — and still ranks
@@ -464,8 +464,8 @@ Or pin the layout yourself:
 ```jsonc
 "Gears": [
   { "Position": "1", "Label": "Luna",    "Model": "gpt-5.6-luna" },
-  { "Position": "2", "Label": "Flash",   "Model": "gemini-3.1-flash" },
-  { "Position": "3", "Label": "Sonnet",  "Model": "claude-sonnet-5.0" },
+  { "Position": "2", "Label": "Sonnet",  "Model": "claude-sonnet-5.0" },
+  { "Position": "3", "Label": "Terra",   "Model": "gpt-5.6-terra" },
   { "Position": "4", "Label": "Sol",     "Model": "gpt-5.6-sol" },
   { "Position": "5", "Label": "Opus",    "Model": "claude-opus-5" },
   { "Position": "R", "Label": "Default", "Model": "" }   // empty model = pass-through
