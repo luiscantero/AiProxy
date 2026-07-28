@@ -115,8 +115,11 @@ public sealed partial class CopilotAuthProvider : IAuthProvider
             var m = models[i];
             var ctx = m.Capabilities?.Limits?.MaxContextWindowTokens;
             var ctxLabel = ctx is { } c ? $"  ctx={c}" : "";
+            // Effort levels drive the ":<level>" model variants, so show what was detected.
+            var efforts = CopilotModelsClient.ReasoningEffortsOf(m);
+            var effortLabel = efforts.Count > 0 ? $"  effort={string.Join('|', efforts)}" : "";
             var label = string.IsNullOrEmpty(m.Name) ? m.Id : $"{m.Id}  ({m.Name})";
-            Console.WriteLine($"  [{i + 1,2}] {label}{ctxLabel}");
+            Console.WriteLine($"  [{i + 1,2}] {label}{ctxLabel}{effortLabel}");
         }
         Console.WriteLine();
 
@@ -173,7 +176,8 @@ public sealed partial class CopilotAuthProvider : IAuthProvider
                 MaxOutputTokens = m.Capabilities?.Limits?.MaxOutputTokens,
                 SupportsVision = m.Capabilities?.Supports?.Vision,
                 SupportsToolCalls = m.Capabilities?.Supports?.ToolCalls,
-                UsesResponsesApi = CopilotModelsClient.UsesResponsesApi(m)
+                UsesResponsesApi = CopilotModelsClient.UsesResponsesApi(m),
+                ReasoningEfforts = CopilotModelsClient.ReasoningEffortsOf(m)
             },
             StringComparer.Ordinal);
 

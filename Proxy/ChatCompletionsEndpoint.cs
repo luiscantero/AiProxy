@@ -5,6 +5,7 @@ using AiProxy.Auth;
 using AiProxy.Pipeline;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 namespace AiProxy.Proxy;
 
@@ -23,6 +24,7 @@ public static partial class ChatCompletionsEndpoint
     public static async Task HandleAsync(
         HttpContext context,
         IEnumerable<IAuthProvider> providers,
+        IOptions<AiProxyOptions> options,
         ChatPipeline pipeline,
         ILoggerFactory loggerFactory)
     {
@@ -55,19 +57,29 @@ public static partial class ChatCompletionsEndpoint
             return;
         }
 
-        var provider = await ProviderResolver.ResolveForModelAsync(providers, requestedModel, cancellationToken).ConfigureAwait(false);
-        if (provider is null)
+        // "<model>:<effort>" is this proxy's stand-in for a thinking-effort control that clients
+        // do not expose; upstream only ever sees the real model plus reasoning_effort.
+        var resolved = await ProviderResolver.ResolveRequestedAsync(
+            providers, requestedModel, options.Value.ReasoningEffort, cancellationToken).ConfigureAwait(false);
+        if (resolved is not { } match)
         {
             await WriteErrorAsync(context, StatusCodes.Status404NotFound,
                 $"Model '{requestedModel}' is not exposed by this proxy.", "model_not_found");
             return;
         }
 
+        var (provider, model, effort) = match;
+        if (effort is not null)
+        {
+            upstreamRequest["model"] = model;
+            upstreamRequest["reasoning_effort"] = effort;
+        }
+
         var pipelineContext = new ChatPipelineContext
         {
             Http = context,
             Surface = ClientSurface.OpenAi,
-            Model = requestedModel,
+            Model = model,
             IsStreaming = isStream,
             UpstreamRequest = upstreamRequest,
             Provider = provider,

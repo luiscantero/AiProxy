@@ -129,6 +129,38 @@ values while you edit.
 ]
 ```
 
+- `ReasoningEffort` — publishes a reasoning model once per thinking effort, as
+  `<model>:<level>` ids. VS Code renders its thinking-effort control from a
+  schema the provider extension attaches to each model, and the Ollama provider
+  publishes none — so the control never appears for models reached through this
+  proxy, whatever `/api/tags` reports. Model *ids* are ours to choose, though, so
+  the effort rides along in the id and is stripped again on the way upstream,
+  where it becomes the usual `reasoning_effort` field.
+
+```jsonc
+"ReasoningEffort": {
+  "Enabled": true,
+  "Levels": [ "medium", "high", "max" ]  // optional filter; empty publishes every level
+}
+```
+
+  There is no list of models to maintain, and `Levels` is a preference rather
+  than a mapping: it is *intersected* with what each model advertises
+  (`capabilities.supports.reasoning_effort`), so a level a model does not have is
+  skipped instead of being sent and rejected. A model that gains, loses or
+  renames a level is followed automatically, and one with no selectable effort is
+  published unchanged. Only publishing is filtered — a client naming a hidden
+  level directly is still honoured.
+
+  `AiProxy models copilot` prints what was detected (`effort=low|medium|high|xhigh|max`)
+  next to each model — and, since the capability is stored with the rest of the
+  model metadata, that command is also how you refresh it after connecting.
+
+  Note that a reasoning model is published *only* at explicit levels, never as a
+  bare id: the catalog advertises no default, so a bare id would mean "whatever
+  the upstream picks". List `"medium"` for the level VS Code itself assumes when
+  it has to choose.
+
 Models from every connected provider are merged into the same `/v1/models` and
 `/api/tags` catalog, and chat requests are routed to the owning provider by the
 requested model id.

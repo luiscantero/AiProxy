@@ -55,4 +55,11 @@ public sealed record ModelInfo
     /// Responses API and reject chat completions.
     /// </summary>
     public bool UsesResponsesApi { get; init; }
+
+    /// <summary>
+    /// The thinking-effort levels this model accepts, exactly as the upstream advertises them
+    /// (typically "low", "medium", "high"). Empty means the model has no selectable effort, so
+    /// no <c>reasoning_effort</c> may be sent to it.
+    /// </summary>
+    public IReadOnlyList<string> ReasoningEfforts { get; init; } = Array.Empty<string>();
 }

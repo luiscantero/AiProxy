@@ -35,6 +35,12 @@ public sealed class AiProxyOptions
     public PixelPressOptions PixelPress { get; set; } = new();
 
     /// <summary>
+    /// Publishes reasoning models once per thinking effort, as <c>&lt;model&gt;:&lt;level&gt;</c>
+    /// variants, so the effort can be picked from any client's plain model list.
+    /// </summary>
+    public ReasoningEffortOptions ReasoningEffort { get; set; } = new();
+
+    /// <summary>
     /// OpenAI-compatible upstreams to expose (OpenAI, OpenRouter, Groq, DeepSeek, Gemini's
     /// OpenAI endpoint, local runtimes, ...). Each entry becomes its own auth provider that
     /// can be connected with <c>AiProxy connect &lt;name&gt;</c>. Adding a new provider is
@@ -163,6 +169,31 @@ public sealed class PixelPressOptions
     /// Default true.
     /// </summary>
     public bool IncludeHint { get; set; } = true;
+}
+
+/// <summary>
+/// Configuration for reasoning-effort model variants. Clients such as VS Code's Ollama provider
+/// offer no UI for thinking effort, so each level a model accepts is published as its own model id
+/// (<c>gpt-5.6-sol:high</c>) and translated back into <c>reasoning_effort</c> upstream. Which
+/// models have levels, and which levels those are, is read from the upstream model catalog, so
+/// there is nothing to keep in step here.
+/// </summary>
+public sealed class ReasoningEffortOptions
+{
+    /// <summary>Master switch. When false only the plain model ids are published.</summary>
+    public bool Enabled { get; set; }
+
+    /// <summary>
+    /// Optional filter over the levels a model advertises, so the picker is not flooded with every
+    /// gradation. This is a preference, not a mapping: it is intersected with what each model
+    /// actually accepts, so a level a model does not have is simply skipped rather than sent and
+    /// rejected, and there is nothing to keep in step as models change. Empty publishes them all.
+    /// <para>
+    /// Only publishing is filtered. A request naming any level the model really accepts is still
+    /// honoured, so a hidden level stays reachable by hand.
+    /// </para>
+    /// </summary>
+    public List<string> Levels { get; set; } = new();
 }
 
 /// <summary>

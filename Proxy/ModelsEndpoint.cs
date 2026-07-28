@@ -1,11 +1,16 @@
 using AiProxy.Auth;
+using AiProxy.Pipeline;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Options;
 
 namespace AiProxy.Proxy;
 
 public static class ModelsEndpoint
 {
-    public static async Task<IResult> HandleAsync(IEnumerable<IAuthProvider> providers, CancellationToken cancellationToken)
+    public static async Task<IResult> HandleAsync(
+        IEnumerable<IAuthProvider> providers,
+        IOptions<AiProxyOptions> options,
+        CancellationToken cancellationToken)
     {
         var byProvider = await ProviderResolver.ListAllAsync(providers, cancellationToken).ConfigureAwait(false);
         if (byProvider.Count == 0)
@@ -22,13 +27,26 @@ public static class ModelsEndpoint
         }
 
         var created = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-        var data = byProvider.SelectMany(pm => pm.Models.Select(id => new
+        var efforts = options.Value.ReasoningEffort;
+        var data = new List<object>();
+        foreach (var (provider, ids) in byProvider)
         {
-            id,
-            @object = "model",
-            created,
-            owned_by = pm.Provider.Name
-        }));
+            var infos = await provider.GetModelInfosAsync(cancellationToken).ConfigureAwait(false);
+            foreach (var id in ids)
+            {
+                infos.TryGetValue(id, out var info);
+                foreach (var publishedId in ReasoningEffort.Expand(id, info, efforts))
+                {
+                    data.Add(new
+                    {
+                        id = publishedId,
+                        @object = "model",
+                        created,
+                        owned_by = provider.Name
+                    });
+                }
+            }
+        }
 
         return Results.Json(new { @object = "list", data });
     }

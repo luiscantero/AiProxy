@@ -5,6 +5,7 @@ using AiProxy.Auth;
 using AiProxy.Pipeline;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 namespace AiProxy.Proxy;
 
@@ -32,10 +33,14 @@ public static partial class OllamaEndpoints
     // ----------------------------------------------------------------------
     // GET /api/tags  -> { "models": [ { name, model, modified_at, size, digest, details } ] }
     // ----------------------------------------------------------------------
-    public static async Task<IResult> Tags(IEnumerable<IAuthProvider> providers, CancellationToken cancellationToken)
+    public static async Task<IResult> Tags(
+        IEnumerable<IAuthProvider> providers,
+        IOptions<AiProxyOptions> options,
+        CancellationToken cancellationToken)
     {
         var byProvider = await ProviderResolver.ListAllAsync(providers, cancellationToken).ConfigureAwait(false);
         var modifiedAt = DateTimeOffset.UtcNow.ToString("yyyy-MM-ddTHH:mm:ss.fffffffK");
+        var efforts = options.Value.ReasoningEffort;
 
         var models = new List<object>();
         foreach (var (provider, ids) in byProvider)
@@ -45,23 +50,29 @@ public static partial class OllamaEndpoints
             {
                 infos.TryGetValue(id, out var info);
                 var family = info?.Family is { Length: > 0 } f ? f.Replace('.', '_') : provider.Name;
-                models.Add(new
+
+                // Each effort level the model accepts is published as its own model, because no
+                // client offers a control for it; the suffix is stripped when the request returns.
+                foreach (var publishedId in ReasoningEffort.Expand(id, info, efforts))
                 {
-                    name = id,
-                    model = id,
-                    modified_at = modifiedAt,
-                    size = 0L,
-                    digest = "",
-                    details = new
+                    models.Add(new
                     {
-                        parent_model = "",
-                        format = "gguf",
-                        family,
-                        families = new[] { family },
-                        parameter_size = "",
-                        quantization_level = ""
-                    }
-                });
+                        name = publishedId,
+                        model = publishedId,
+                        modified_at = modifiedAt,
+                        size = 0L,
+                        digest = "",
+                        details = new
+                        {
+                            parent_model = "",
+                            format = "gguf",
+                            family,
+                            families = new[] { family },
+                            parameter_size = "",
+                            quantization_level = ""
+                        }
+                    });
+                }
             }
         }
 
@@ -71,7 +82,11 @@ public static partial class OllamaEndpoints
     // ----------------------------------------------------------------------
     // POST /api/show  body: { "model" | "name" : "..." }
     // ----------------------------------------------------------------------
-    public static async Task<IResult> Show(HttpContext context, IEnumerable<IAuthProvider> providers, CancellationToken cancellationToken)
+    public static async Task<IResult> Show(
+        HttpContext context,
+        IEnumerable<IAuthProvider> providers,
+        IOptions<AiProxyOptions> options,
+        CancellationToken cancellationToken)
     {
         using var doc = await JsonDocument.ParseAsync(context.Request.Body, cancellationToken: cancellationToken).ConfigureAwait(false);
         string? requested = null;
@@ -89,14 +104,18 @@ public static partial class OllamaEndpoints
             return Results.Json(new { error = "model not found" }, statusCode: 404);
         }
 
-        var provider = await ProviderResolver.ResolveForModelAsync(providers, requested, cancellationToken).ConfigureAwait(false);
-        if (provider is null)
+        // An effort variant describes the same upstream model, so report the model behind it.
+        var resolved = await ProviderResolver.ResolveRequestedAsync(
+            providers, requested, options.Value.ReasoningEffort, cancellationToken).ConfigureAwait(false);
+        if (resolved is not { } match)
         {
             return Results.Json(new { error = "model not found" }, statusCode: 404);
         }
 
+        var (provider, requestedModel, _) = match;
+
         var infos = await provider.GetModelInfosAsync(cancellationToken).ConfigureAwait(false);
-        infos.TryGetValue(requested, out var info);
+        infos.TryGetValue(requestedModel, out var info);
         var arch = provider.Name;
         var family = info?.Family is { Length: > 0 } f ? f.Replace('.', '_') : provider.Name;
         var contextLength = info?.MaxContextWindowTokens ?? 0;
@@ -104,8 +123,8 @@ public static partial class OllamaEndpoints
         var modelInfo = new Dictionary<string, object?>
         {
             ["general.architecture"] = arch,
-            ["general.basename"] = requested,
-            ["general.name"] = info?.Name ?? requested
+            ["general.basename"] = requestedModel,
+            ["general.name"] = info?.Name ?? requestedModel
         };
         if (contextLength > 0)
         {
@@ -170,6 +189,7 @@ public static partial class OllamaEndpoints
     public static async Task Chat(
         HttpContext context,
         IEnumerable<IAuthProvider> providers,
+        IOptions<AiProxyOptions> options,
         ChatPipeline pipeline,
         ILoggerFactory loggerFactory)
     {
@@ -197,12 +217,17 @@ public static partial class OllamaEndpoints
             return;
         }
 
-        var provider = await ProviderResolver.ResolveForModelAsync(providers, req.Model, cancellationToken).ConfigureAwait(false);
-        if (provider is null)
+        // "<model>:<effort>" is this proxy's stand-in for a thinking-effort control the Ollama
+        // clients do not have; upstream only ever sees the real model plus reasoning_effort.
+        var resolved = await ProviderResolver.ResolveRequestedAsync(
+            providers, req.Model, options.Value.ReasoningEffort, cancellationToken).ConfigureAwait(false);
+        if (resolved is not { } match)
         {
             await WriteJsonErrorAsync(context, 404, $"model '{req.Model}' not found");
             return;
         }
+
+        var (provider, model, effort) = match;
 
         // Default for Ollama is stream=true.
         var isStream = req.Stream ?? true;
@@ -216,10 +241,14 @@ public static partial class OllamaEndpoints
 
         var upstreamRequest = new JsonObject
         {
-            ["model"] = req.Model,
+            ["model"] = model,
             ["messages"] = messages,
             ["stream"] = isStream
         };
+        if (effort is not null)
+        {
+            upstreamRequest["reasoning_effort"] = effort;
+        }
         if (req.Options is { } opts)
         {
             if (opts.Temperature is { } t) upstreamRequest["temperature"] = t;
@@ -243,7 +272,7 @@ public static partial class OllamaEndpoints
         {
             Http = context,
             Surface = ClientSurface.Ollama,
-            Model = req.Model,
+            Model = model,
             IsStreaming = isStream,
             UpstreamRequest = upstreamRequest,
             Provider = provider,

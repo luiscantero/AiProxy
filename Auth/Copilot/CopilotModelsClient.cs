@@ -1,5 +1,6 @@
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.Extensions.Options;
 
@@ -137,7 +138,28 @@ public sealed class CopilotModelsClient
         [property: JsonPropertyName("streaming")] bool? Streaming,
         [property: JsonPropertyName("tool_calls")] bool? ToolCalls,
         [property: JsonPropertyName("parallel_tool_calls")] bool? ParallelToolCalls,
-        [property: JsonPropertyName("vision")] bool? Vision);
+        [property: JsonPropertyName("vision")] bool? Vision,
+        [property: JsonPropertyName("reasoning_effort")] JsonElement? ReasoningEffort);
+
+    /// <summary>
+    /// The effort levels a model accepts, as advertised by <c>capabilities.supports.reasoning_effort</c>.
+    /// Copilot reports this as an array of the accepted values; anything else (absent, a bare
+    /// boolean, an empty array) means "no selectable effort" and yields an empty list, because
+    /// sending a level a model does not know is an upstream 400.
+    /// </summary>
+    public static IReadOnlyList<string> ReasoningEffortsOf(ModelEntry model)
+    {
+        if (model.Capabilities?.Supports?.ReasoningEffort is not { ValueKind: JsonValueKind.Array } levels)
+        {
+            return Array.Empty<string>();
+        }
+
+        return levels.EnumerateArray()
+            .Where(level => level.ValueKind == JsonValueKind.String)
+            .Select(level => level.GetString()!)
+            .Where(level => level.Length > 0)
+            .ToList();
+    }
 
     private sealed record ModelsResponse(
         [property: JsonPropertyName("data")] List<ModelEntry>? Data);
