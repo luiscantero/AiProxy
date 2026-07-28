@@ -32,23 +32,18 @@ The gearbox must be enabled in the proxy (`Gearbox.Enabled: true`); if it is not
 | Requirement | Notes |
 | --- | --- |
 | Rust (stable, MSVC toolchain) | `winget install Rustlang.Rustup` |
-| MSVC C++ build tools | `winget install Microsoft.VisualStudio.2022.BuildTools --override "--wait --passive --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"` |
+| MSVC C++ build tools | in the Visual Studio installer's *Individual components*: **"MSVC Build Tools version 14.51"** (id `Microsoft.VisualStudio.Component.VC.Tools.x86.x64`) — the standalone Build Tools installer works too |
+| Windows SDK | comes with the component above |
 | WebView2 runtime | preinstalled on Windows 11 |
 | Tauri CLI | `cargo install tauri-cli --version "^2.0" --locked` |
 
 Node is only needed to regenerate the icon, and only from the standard library — there are no npm
 dependencies.
 
-> If linking fails with `LNK1104: cannot open file 'msvcrt.lib'`, `rustc` picked a `link.exe` from a
-> Visual Studio install without the CRT/SDK libraries. Build from a *Developer PowerShell*, or load
-> the environment into the current shell first:
->
-> ```powershell
-> $vcvars = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat"
-> cmd /c "`"$vcvars`" >nul 2>&1 && set" | ForEach-Object {
->   if ($_ -match '^(.*?)=(.*)$') { Set-Item -Path "env:$($matches[1])" -Value $matches[2] }
-> }
-> ```
+> `LNK1104: cannot open file 'msvcrt.lib'` means the C++ component above is missing: `rustc` found a
+> `link.exe` (Visual Studio ships one for .NET native AOT) but no desktop CRT libraries. Check for
+> `VC\Tools\MSVC\<version>\lib\x64` — if only `lib\onecore` is there, add the component. No developer
+> prompt or `vcvars` script is needed once it is installed; `rustc` locates the toolchain itself.
 
 ## Build
 
