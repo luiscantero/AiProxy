@@ -15,6 +15,9 @@ const baseUrlInput = document.getElementById("base-url");
 let current = null;
 let busy = false;
 let pinned = false;
+let errored = false;
+
+const READY_MESSAGE = "Shift a gear to re-route every request to that model.";
 
 // ----------------------------------------------------------------------
 // Rendering
@@ -23,6 +26,7 @@ let pinned = false;
 function say(message, isError = false) {
   foot.textContent = message;
   foot.className = isError ? "foot err" : "foot";
+  errored = isError;
 }
 
 function online(isOnline) {
@@ -139,7 +143,9 @@ async function refresh(quiet = false) {
   try {
     render(await invoke("fetch_state"));
     online(true);
-    if (!quiet) say("Shift a gear to re-route every request to that model.");
+    // A quiet poll leaves the footer alone, except when it is still showing a stale
+    // error from a previous failure — the proxy is clearly back now.
+    if (!quiet || errored) say(READY_MESSAGE);
   } catch (e) {
     online(false);
     say(String(e), true);

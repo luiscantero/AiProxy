@@ -224,6 +224,8 @@ async function shift(position) {
       throw new Error(err.error || res.status);
     }
     render(await res.json());
+    foot.className = "foot";
+    foot.textContent = "Shift a gear to re-route every request to that model.";
   } catch (e) {
     foot.className = "foot err";
     foot.textContent = "Shift failed: " + e.message;
